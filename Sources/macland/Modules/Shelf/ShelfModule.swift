@@ -59,7 +59,7 @@ final class ShelfModule: FileDropReceiving {
 
     @ObservationIgnored private var didLoad = false
 
-    private static let supportDirectory = URL.applicationSupportDirectory.appending(path: "Island", directoryHint: .isDirectory)
+    private static let supportDirectory = URL.applicationSupportDirectory.appending(path: "macland", directoryHint: .isDirectory)
     private static let copiesDirectory = supportDirectory.appending(path: "Shelf", directoryHint: .isDirectory)
     private static let indexFile = supportDirectory.appending(path: "shelf.json")
 

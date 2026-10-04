@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Compile Island et produit build/Island.app (100 % local, aucun compte développeur requis).
+# Compile macland et produit build/macland.app (100 % local, aucun compte développeur requis).
 #
 # Usage : scripts/build-app.sh [--run] [--install]
 #   --run      lance l'app après compilation (en fermant l'instance existante)
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
-APP="$ROOT/build/Island.app"
+APP="$ROOT/build/macland.app"
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
   IDENTITY="$CODESIGN_IDENTITY"
 elif security find-certificate -c "Island Local Signing" >/dev/null 2>&1; then
@@ -25,7 +25,7 @@ swift build -c release --arch arm64
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$(swift build -c release --arch arm64 --show-bin-path)/Island" "$APP/Contents/MacOS/Island"
+cp "$(swift build -c release --arch arm64 --show-bin-path)/macland" "$APP/Contents/MacOS/macland"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
@@ -43,7 +43,7 @@ cat > "$FRAMEWORK/Versions/A/Resources/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>local.elion.island.MediaRemoteAdapter</string>
+  <key>CFBundleIdentifier</key><string>local.elion.macland.MediaRemoteAdapter</string>
   <key>CFBundleName</key><string>MediaRemoteAdapter</string>
   <key>CFBundleExecutable</key><string>MediaRemoteAdapter</string>
   <key>CFBundlePackageType</key><string>FMWK</string>
@@ -62,9 +62,9 @@ for arg in "$@"; do
   case "$arg" in
     --install)
       mkdir -p "$HOME/Applications"
-      rm -rf "$HOME/Applications/Island.app"
+      rm -rf "$HOME/Applications/macland.app"
       cp -R "$APP" "$HOME/Applications/"
-      APP="$HOME/Applications/Island.app"
+      APP="$HOME/Applications/macland.app"
       echo "✓ installée dans $APP"
       ;;
   esac
@@ -72,7 +72,7 @@ done
 
 for arg in "$@"; do
   if [[ "$arg" == "--run" ]]; then
-    pkill -x Island 2>/dev/null || true
+    pkill -x macland 2>/dev/null || true
     sleep 0.3
     open "$APP"
   fi

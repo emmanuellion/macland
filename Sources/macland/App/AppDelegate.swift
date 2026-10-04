@@ -284,13 +284,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let item = statusItem ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "capsule.fill", accessibilityDescription: "Island")
+        item.button?.image = NSImage(systemSymbolName: "capsule.fill", accessibilityDescription: "macland")
         item.button?.image?.isTemplate = true
 
         let menu = NSMenu()
         menu.addItem(withTitle: tr("Réglages…", "Settings…"), action: #selector(openSettingsAction), keyEquivalent: ",").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: tr("Quitter Island", "Quit Island"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: tr("Quitter macland", "Quit macland"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
         statusItem = item
     }
@@ -302,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
-            window.title = tr("Réglages d'Island", "Island Settings")
+            window.title = tr("Réglages de macland", "macland Settings")
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden

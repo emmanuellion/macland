@@ -1,5 +1,8 @@
 import AppKit
 
+// Avant tout accès aux réglages : reprend les données de l'ancien nom de l'app.
+LegacyMigration.run()
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()

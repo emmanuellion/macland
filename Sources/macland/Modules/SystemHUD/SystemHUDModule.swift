@@ -325,8 +325,8 @@ private struct SystemHUDSettingsView: View {
     var body: some View {
         PickerRow(tr("Mode", "Mode"),
                   subtitle: module.mode == .replace
-                      ? tr("Intercepte les touches : seul le HUD d'Island s'affiche.",
-                           "Intercepts the keys: only Island's HUD is shown.")
+                      ? tr("Intercepte les touches : seul le HUD de macland s'affiche.",
+                           "Intercepts the keys: only macland's HUD is shown.")
                       : tr("Sans permission : le HUD de macOS s'affiche aussi.",
                            "No permission needed: the macOS HUD is shown too."),
                   selection: $module.mode) {
@@ -343,8 +343,8 @@ private struct SystemHUDSettingsView: View {
             }
         } else if module.mode == .replace && module.tapFailed {
             SettingsRow(tr("Interception impossible", "Can't intercept keys"),
-                        subtitle: tr("Retire puis rajoute Island dans Confidentialité › Accessibilité.",
-                                     "Remove and re-add Island in Privacy › Accessibility.")) {
+                        subtitle: tr("Retire puis rajoute macland dans Confidentialité › Accessibilité.",
+                                     "Remove and re-add macland in Privacy › Accessibility.")) {
                 Button(tr("Réglages", "Settings")) { module.openAccessibilitySettings() }
             }
         }

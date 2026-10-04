@@ -75,7 +75,7 @@ private struct SettingsSidebar: View {
                 .shadow(color: .purple.opacity(0.25), radius: 4, y: 2)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Island").font(.system(size: 15, weight: .bold))
+                    Text("macland").font(.system(size: 15, weight: .bold))
                     Text(tr("Réglages", "Settings")).font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
             }
@@ -110,7 +110,7 @@ private struct SettingsSidebar: View {
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Label(tr("Quitter Island", "Quit Island"), systemImage: "power")
+                Label(tr("Quitter macland", "Quit macland"), systemImage: "power")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }

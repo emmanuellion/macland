@@ -98,8 +98,8 @@ final class NowPlayingModule: IslandModule {
 
     func start() {
         error = MediaRemoteAdapter.isAvailable ? nil
-            : tr("Adaptateur absent : lance l'app depuis Island.app (scripts/build-app.sh).",
-                 "Adapter missing: launch the app from Island.app (scripts/build-app.sh).")
+            : tr("Adaptateur absent : lance l'app depuis macland.app (scripts/build-app.sh).",
+                 "Adapter missing: launch the app from macland.app (scripts/build-app.sh).")
         #if DEBUG
         // Simule « rien en lecture » pour les captures.
         if CommandLine.arguments.contains("--no-media") { return }

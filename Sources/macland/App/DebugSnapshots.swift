@@ -11,7 +11,7 @@ func debugLog(_ message: @autoclosure () -> String) {
 #if DEBUG
 import AppKit
 
-/// Développement uniquement : `Island --snapshots <dossier>` capture les fenêtres de l'app en PNG
+/// Développement uniquement : `macland --snapshots <dossier>` capture les fenêtres de l'app en PNG
 /// (une app peut capturer ses propres fenêtres sans permission d'enregistrement d'écran).
 @MainActor
 enum DebugSnapshots {

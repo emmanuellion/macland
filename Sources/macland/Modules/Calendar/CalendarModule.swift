@@ -266,10 +266,10 @@ private struct CalendarSettingsView: View {
         if module.access != .granted {
             SettingsRow(tr("Accès au calendrier", "Calendar access"),
                         subtitle: module.access == .denied
-                            ? tr("Refusé. Autorise Island dans Confidentialité et sécurité › Calendriers.",
-                                 "Denied. Allow Island in Privacy & Security › Calendars.")
-                            : tr("Island a besoin de l'accès pour afficher tes événements.",
-                                 "Island needs access to show your events.")) {
+                            ? tr("Refusé. Autorise macland dans Confidentialité et sécurité › Calendriers.",
+                                 "Denied. Allow macland in Privacy & Security › Calendars.")
+                            : tr("macland a besoin de l'accès pour afficher tes événements.",
+                                 "macland needs access to show your events.")) {
                 Button(module.access == .denied ? tr("Ouvrir les réglages", "Open Settings") : tr("Autoriser", "Allow")) {
                     if module.access == .denied {
                         module.openPrivacySettings()

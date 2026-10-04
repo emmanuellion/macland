@@ -48,7 +48,7 @@ struct NotchView: View {
         .contextMenu {
             Button(tr("Réglages…", "Settings…"), action: onOpenSettings)
             Divider()
-            Button(tr("Quitter Island", "Quit Island")) { NSApp.terminate(nil) }
+            Button(tr("Quitter macland", "Quit macland")) { NSApp.terminate(nil) }
         }
         .animation(animation, value: model.isExpanded)
         .animation(animation, value: size)

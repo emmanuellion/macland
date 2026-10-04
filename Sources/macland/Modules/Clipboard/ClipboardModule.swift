@@ -122,7 +122,7 @@ final class ClipboardModule: IslandModule {
     @ObservationIgnored private var images: [UUID: NSImage] = [:]
     @ObservationIgnored private var didLoad = false
 
-    private static let directory = URL.applicationSupportDirectory.appending(path: "Island/Clipboard", directoryHint: .isDirectory)
+    private static let directory = URL.applicationSupportDirectory.appending(path: "macland/Clipboard", directoryHint: .isDirectory)
     private static let indexFile = directory.appending(path: "history.json")
 
     /// Types posés par les gestionnaires de mots de passe (convention nspasteboard.org).
@@ -603,8 +603,8 @@ private struct ClipboardSettingsView: View {
         ToggleRow(tr("Fermer l'île après une copie", "Close island after copying"), isOn: $module.closeAfterCopy)
         ToggleRow(tr("Coller automatiquement", "Paste automatically"),
                   subtitle: module.autoPaste && !module.hasAccessibility
-                      ? tr("Autorise Island dans Confidentialité et sécurité › Accessibilité.",
-                           "Allow Island in Privacy & Security › Accessibility.")
+                      ? tr("Autorise macland dans Confidentialité et sécurité › Accessibilité.",
+                           "Allow macland in Privacy & Security › Accessibility.")
                       : tr("Colle directement dans l'app active (permission Accessibilité).",
                            "Pastes straight into the active app (Accessibility permission)."),
                   isOn: $module.autoPaste)

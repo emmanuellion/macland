@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Resources/AppIcon.png" width="128" alt="Island icon">
+  <img src="Resources/AppIcon.png" width="128" alt="macland icon">
 </p>
 
-<h1 align="center">Island</h1>
+<h1 align="center">macland</h1>
 
 <p align="center">
   Turn the MacBook notch into a living, fully configurable island.<br>
@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Island demo" width="100%">
+  <img src="docs/demo.gif" alt="macland demo" width="100%">
 </p>
 
-> 🇫🇷 Island est aussi disponible en français : l'app suit la langue de macOS, ou se règle dans Réglages › Général › Langue.
+> 🇫🇷 macland est aussi disponible en français : l'app suit la langue de macOS, ou se règle dans Réglages › Général › Langue.
 
 ## Features
 
@@ -48,8 +48,8 @@ Every module can be turned on or off, reordered and tuned. The island itself com
 
 ## Install
 
-1. Download `Island-x.y.z.dmg` from the [Releases](../../releases) page and drag **Island** to **Applications**.
-2. Open it. Island isn't notarized by Apple (it's a free side project without a paid developer account), so macOS will block it the first time:
+1. Download `macland-x.y.z.dmg` from the [Releases](../../releases) page and drag **macland** to **Applications**.
+2. Open it. macland isn't notarized by Apple (it's a free side project without a paid developer account), so macOS will block it the first time:
    open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**.
 3. Hover the notch. Settings are in the menu bar icon, or right-click the island.
 
@@ -64,9 +64,9 @@ Requires macOS 15 or later on a Mac with a notch (other displays can show a virt
 No Xcode or Apple developer account needed — the Command Line Tools are enough.
 
 ```sh
-scripts/build-app.sh --run            # builds build/Island.app and launches it
+scripts/build-app.sh --run            # builds build/macland.app and launches it
 scripts/build-app.sh --install --run  # installs to ~/Applications (needed for launch at login)
-scripts/make-dmg.sh                   # builds build/Island-<version>.dmg
+scripts/make-dmg.sh                   # builds build/macland-<version>.dmg
 ```
 
 The build script signs with a local self-signed certificate named “Island Local Signing” if one exists in your keychain
@@ -79,7 +79,7 @@ The build script signs with a local self-signed certificate named “Island Loca
 - Brightness and keyboard backlight use the private DisplayServices and CoreBrightness frameworks.
 - Camera/mic detection uses CoreMediaIO and per-process CoreAudio properties — no camera or microphone access is requested.
 
-Private APIs mean an Apple update can break a feature; Island degrades gracefully when that happens.
+Private APIs mean an Apple update can break a feature; macland degrades gracefully when that happens.
 
 ## License
 

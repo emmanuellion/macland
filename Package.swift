@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Island",
+    name: "macland",
     platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
-            name: "Island",
-            path: "Sources/Island",
+            name: "macland",
+            path: "Sources/macland",
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
