@@ -108,7 +108,8 @@ final class MediaRemoteAdapter {
     private func launchStream() {
         guard isRunning else { return }
         guard let arguments = arguments(["stream", "--micros", "--debounce=50"]) else {
-            onFailure?("Adaptateur introuvable dans l'app. Recompile avec scripts/build-app.sh.")
+            onFailure?(tr("Adaptateur introuvable dans l'app. Recompile avec scripts/build-app.sh.",
+                          "Adapter not found in the app. Rebuild with scripts/build-app.sh."))
             return
         }
 
@@ -149,7 +150,8 @@ final class MediaRemoteAdapter {
         guard isRunning else { return }
         failures += 1
         if failures >= 5 {
-            onFailure?("La lecture en cours ne répond plus (une mise à jour de macOS a peut-être cassé l'adaptateur).")
+            onFailure?(tr("La lecture en cours ne répond plus (une mise à jour de macOS a peut-être cassé l'adaptateur).",
+                          "Now Playing stopped responding (a macOS update may have broken the adapter)."))
             isRunning = false
             return
         }

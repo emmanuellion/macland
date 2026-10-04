@@ -14,9 +14,9 @@ struct BatteryState: Equatable {
 @Observable
 final class BatteryModule: IslandModule {
     let id = "battery"
-    let name = "Batterie"
+    var name: String { tr("Batterie", "Battery") }
     let systemImage = "battery.75percent"
-    let summary = "Niveau de batterie, état de charge et autonomie restante."
+    var summary: String { tr("Niveau de batterie, état de charge et autonomie restante.", "Battery level, charging state and time remaining.") }
     let tint = Color.green
 
     @ObservationIgnored private let store = ModuleDefaults(moduleID: "battery", registering: [
@@ -65,7 +65,7 @@ final class BatteryModule: IslandModule {
     private func announceChanges(from old: BatteryState, to new: BatteryState) {
         if chargingActivity, old.isPluggedIn != new.isPluggedIn {
             let plugged = new.isPluggedIn
-            let color: Color = plugged ? .green : (Double(new.percentage) <= lowThreshold ? .red : .white)
+            let color: Color = plugged ? .green : (Double(new.percentage) <= lowThreshold ? .red : Color.primary)
             ActivityCenter.shared.show(LiveActivity(id: "battery.power", priority: 1) {
                 Image(systemName: plugged ? "bolt.fill" : "powerplug")
                     .foregroundStyle(color)
@@ -77,7 +77,7 @@ final class BatteryModule: IslandModule {
         let threshold = Int(lowThreshold)
         if lowBatteryActivity, !new.isPluggedIn, old.percentage > threshold, new.percentage <= threshold {
             ActivityCenter.shared.show(LiveActivity(id: "battery.low", priority: 3, duration: 6) {
-                Text("Batterie faible").foregroundStyle(.red).lineLimit(1).fixedSize()
+                Text(tr("Batterie faible", "Low battery")).foregroundStyle(.red).lineLimit(1).fixedSize()
             } trailing: {
                 BatteryGauge(percentage: new.percentage, color: .red)
             })
@@ -131,41 +131,28 @@ private struct BatteryView: View {
 
     private var tint: Color {
         if state.isCharging || state.isPluggedIn { return .green }
-        return Double(state.percentage) <= module.lowThreshold ? .red : .white
-    }
-
-    private var symbol: String {
-        if state.isCharging { return "battery.100percent.bolt" }
-        switch state.percentage {
-        case ..<13: return "battery.0percent"
-        case ..<38: return "battery.25percent"
-        case ..<63: return "battery.50percent"
-        case ..<88: return "battery.75percent"
-        default: return "battery.100percent"
-        }
+        return Double(state.percentage) <= module.lowThreshold ? .red : Color.primary
     }
 
     private var subtitle: String? {
-        if state.isPluggedIn && !state.isCharging { return "Branché" }
+        if state.isPluggedIn && !state.isCharging { return tr("Branché", "Plugged in") }
         guard module.showTimeRemaining, let minutes = state.minutesRemaining else {
-            return state.isCharging ? "En charge" : nil
+            return state.isCharging ? tr("En charge", "Charging") : nil
         }
         let time = "\(minutes / 60) h \(String(format: "%02d", minutes % 60))"
-        return state.isCharging ? "Pleine dans \(time)" : "\(time) restantes"
+        return state.isCharging ? tr("Pleine dans \(time)", "Full in \(time)") : tr("\(time) restantes", "\(time) left")
     }
 
     var body: some View {
         if state.hasBattery {
             HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.system(size: 26))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(tint)
+                BatteryIcon(percentage: state.percentage, color: tint, isCharging: state.isCharging)
+                    .frame(width: 38, height: 18)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(state.percentage) %")
                         .font(.system(size: 20, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.primary)
                     if let subtitle {
                         Text(subtitle)
                             .font(.system(size: 12, weight: .medium))
@@ -174,8 +161,42 @@ private struct BatteryView: View {
                 }
             }
         } else {
-            Label("Pas de batterie", systemImage: "powerplug")
+            Label(tr("Pas de batterie", "No battery"), systemImage: "powerplug")
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Batterie dessinée (le symbole système ignore la teinte dans certains rendus).
+private struct BatteryIcon: View {
+    let percentage: Int
+    let color: Color
+    let isCharging: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            let capWidth = proxy.size.width * 0.07
+            let bodyWidth = proxy.size.width - capWidth - 1.5
+            HStack(spacing: 1.5) {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: proxy.size.height * 0.3, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: proxy.size.height * 0.18, style: .continuous)
+                        .fill(color)
+                        .frame(width: max(2, (bodyWidth - 6) * CGFloat(min(max(percentage, 0), 100)) / 100))
+                        .padding(3)
+                    if isCharging {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: proxy.size.height * 0.7, weight: .bold))
+                            .foregroundStyle(Color.primary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(width: bodyWidth)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.primary.opacity(0.45))
+                    .frame(width: capWidth, height: proxy.size.height * 0.4)
+            }
         }
     }
 }
@@ -189,7 +210,7 @@ private struct BatteryGauge: View {
         HStack(spacing: 5) {
             Text("\(percentage) %").monospacedDigit()
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3).strokeBorder(.white.opacity(0.4), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 3).strokeBorder(Color.primary.opacity(0.4), lineWidth: 1)
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(color)
                     .frame(width: max(2, 18 * CGFloat(percentage) / 100))
@@ -205,12 +226,16 @@ private struct BatterySettingsView: View {
     @Bindable var module: BatteryModule
 
     var body: some View {
-        ToggleRow("Autonomie restante", subtitle: "Temps avant la fin de la charge ou de la batterie.",
+        ToggleRow(tr("Autonomie restante", "Time remaining"),
+                  subtitle: tr("Temps avant la fin de la charge ou de la batterie.", "Time until fully charged or empty."),
                   isOn: $module.showTimeRemaining)
-        SliderRow("Seuil batterie faible", value: $module.lowThreshold, range: 5...50, step: 5) { "\(Int($0)) %" }
-        ToggleRow("Activité au branchement", subtitle: "Affiche le niveau quand tu branches ou débranches le chargeur.",
+        SliderRow(tr("Seuil batterie faible", "Low battery threshold"), value: $module.lowThreshold, range: 5...50, step: 5) { "\(Int($0)) %" }
+        ToggleRow(tr("Activité au branchement", "Charger activity"),
+                  subtitle: tr("Affiche le niveau quand tu branches ou débranches le chargeur.",
+                               "Shows the level when you plug in or unplug the charger."),
                   isOn: $module.chargingActivity)
-        ToggleRow("Alerte batterie faible", subtitle: "Prévient quand le niveau passe sous le seuil.",
+        ToggleRow(tr("Alerte batterie faible", "Low battery alert"),
+                  subtitle: tr("Prévient quand le niveau passe sous le seuil.", "Warns when the level drops below the threshold."),
                   isOn: $module.lowBatteryActivity)
     }
 }

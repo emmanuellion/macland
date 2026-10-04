@@ -16,6 +16,7 @@ final class ModuleRegistry {
         BatteryModule(),
         ClipboardModule(),
         ShelfModule(),
+        ControlsModule(),
         SystemHUDModule(),
         PrivacyIndicatorModule(),
     ]

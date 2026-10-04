@@ -174,6 +174,9 @@ final class NotchWindowController {
     }
 
     private func mouseDownOutside() {
+        #if DEBUG
+        if debugPinned { return }
+        #endif
         dragChangeCountAtMouseDown = NSPasteboard(name: .drag).changeCount
         guard model.isExpanded, !activeRect.contains(NSEvent.mouseLocation) else { return }
         collapse()
@@ -204,6 +207,8 @@ final class NotchWindowController {
         model.expand(page: page)
     }
     func debugCollapse() { model.collapse() }
+    func debugSelect(page: String) { model.selectedPage = page }
+    func debugMediaFrame() -> CGImage? { DebugMedia.frame(of: panel, notchHeight: model.geometry.size.height) }
 
     /// `point` en coordonnées SwiftUI globales (origine en haut à gauche du panneau).
     func debugSendMouse(_ type: NSEvent.EventType, at point: CGPoint) {

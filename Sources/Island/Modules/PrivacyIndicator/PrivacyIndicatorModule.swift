@@ -4,9 +4,12 @@ import SwiftUI
 @Observable
 final class PrivacyIndicatorModule: IslandModule {
     let id = "privacy"
-    let name = "Caméra & micro"
+    var name: String { tr("Caméra & micro", "Camera & Mic") }
     let systemImage = "video.fill"
-    let summary = "Signale à côté de l'encoche quand une app utilise la caméra ou le micro."
+    var summary: String {
+        tr("Signale à côté de l'encoche quand une app utilise la caméra ou le micro.",
+           "Shows next to the notch when an app is using the camera or microphone.")
+    }
     let tint = Color.green
     let kind = ModuleKind.background
 
@@ -65,9 +68,9 @@ final class PrivacyIndicatorModule: IslandModule {
 
         if announce {
             if camera && !cameraActive {
-                announceUse("Caméra", systemImage: "video.fill", color: Self.cameraColor, apps: [])
+                announceUse(tr("Caméra", "Camera"), systemImage: "video.fill", color: Self.cameraColor, apps: [])
             } else if let newApp = microphone.first(where: { !microphoneApps.contains($0) }) {
-                announceUse("Micro", systemImage: "mic.fill", color: Self.microphoneColor, apps: [newApp])
+                announceUse(tr("Micro", "Mic"), systemImage: "mic.fill", color: Self.microphoneColor, apps: [newApp])
             }
         }
 
@@ -83,7 +86,7 @@ final class PrivacyIndicatorModule: IslandModule {
                 Text(label).lineLimit(1).fixedSize()
             }
         } trailing: {
-            Text(apps.first ?? "active")
+            Text(apps.first ?? tr("active", "active"))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(color)
                 .lineLimit(1)
@@ -113,13 +116,13 @@ private struct PrivacySettingsView: View {
 
     private var status: String {
         var parts: [String] = []
-        if module.cameraActive { parts.append("caméra active") }
-        if !module.microphoneApps.isEmpty { parts.append("micro : " + module.microphoneApps.joined(separator: ", ")) }
-        return parts.isEmpty ? "Rien n'utilise la caméra ni le micro." : parts.joined(separator: " · ").capitalizingFirstLetter
+        if module.cameraActive { parts.append(tr("caméra active", "camera in use")) }
+        if !module.microphoneApps.isEmpty { parts.append(tr("micro : ", "mic: ") + module.microphoneApps.joined(separator: ", ")) }
+        return parts.isEmpty ? tr("Rien n'utilise la caméra ni le micro.", "Nothing is using the camera or microphone.") : parts.joined(separator: " · ").capitalizingFirstLetter
     }
 
     var body: some View {
-        SettingsRow("En ce moment", subtitle: status) {
+        SettingsRow(tr("En ce moment", "Right now"), subtitle: status) {
             HStack(spacing: 6) {
                 Circle().fill(module.cameraActive ? PrivacyIndicatorModule.cameraColor : .secondary.opacity(0.3))
                     .frame(width: 9, height: 9)
@@ -127,13 +130,17 @@ private struct PrivacySettingsView: View {
                     .frame(width: 9, height: 9)
             }
         }
-        ToggleRow("Caméra", subtitle: "Point vert à gauche de l'encoche.", leadingColor: PrivacyIndicatorModule.cameraColor,
+        ToggleRow(tr("Caméra", "Camera"), subtitle: tr("Point vert à gauche de l'encoche.", "Green dot to the left of the notch."), leadingColor: PrivacyIndicatorModule.cameraColor,
                   isOn: $module.watchesCamera)
-        ToggleRow("Micro", subtitle: "Point orange à droite de l'encoche.", leadingColor: PrivacyIndicatorModule.microphoneColor,
+        ToggleRow(tr("Micro", "Microphone"), subtitle: tr("Point orange à droite de l'encoche.", "Orange dot to the right of the notch."), leadingColor: PrivacyIndicatorModule.microphoneColor,
                   isOn: $module.watchesMicrophone)
-        ToggleRow("Annonce au démarrage", subtitle: "Affiche brièvement quelle app commence à utiliser le micro.",
+        ToggleRow(tr("Annonce au démarrage", "Announce on start"),
+                  subtitle: tr("Affiche brièvement quelle app commence à utiliser le micro.",
+                               "Briefly shows which app starts using the microphone."),
                   isOn: $module.announce)
-        ToggleRow("Points persistants", subtitle: "Restent affichés tant que la caméra ou le micro sont utilisés.",
+        ToggleRow(tr("Points persistants", "Persistent dots"),
+                  subtitle: tr("Restent affichés tant que la caméra ou le micro sont utilisés.",
+                               "Stay visible while the camera or microphone is in use."),
                   isOn: $module.persistentDots)
     }
 }

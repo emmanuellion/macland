@@ -26,9 +26,12 @@ enum CalendarAccess {
 @Observable
 final class CalendarModule: IslandModule {
     let id = "calendar"
-    let name = "Calendrier"
+    var name: String { tr("Calendrier", "Calendar") }
     let systemImage = "calendar"
-    let summary = "Prochains événements et rappel juste avant qu'ils commencent."
+    var summary: String {
+        tr("Prochains événements et rappel juste avant qu'ils commencent.",
+           "Upcoming events and a reminder just before they start.")
+    }
     let tint = Color.red
     let enabledByDefault = false
 
@@ -143,7 +146,7 @@ final class CalendarModule: IslandModule {
             .sorted { $0.startDate < $1.startDate }
             .map {
                 CalendarEvent(id: $0.calendarItemIdentifier + "\($0.startDate.timeIntervalSince1970)",
-                              title: $0.title ?? "Sans titre",
+                              title: $0.title ?? tr("Sans titre", "Untitled"),
                               start: $0.startDate,
                               end: $0.endDate,
                               isAllDay: $0.isAllDay,
@@ -170,7 +173,7 @@ final class CalendarModule: IslandModule {
                 Text(event.title).lineLimit(1)
             }
         } trailing: {
-            Text("dans \(minutes) min").foregroundStyle(event.color)
+            Text(tr("dans \(minutes) min", "in \(minutes) min")).foregroundStyle(event.color)
         })
     }
 }
@@ -185,7 +188,7 @@ private struct CalendarView: View {
         case .granted:
             let events = Array(module.events.prefix(Int(module.maxEvents)))
             if events.isEmpty {
-                Label("Rien de prévu", systemImage: "calendar.badge.checkmark")
+                Label(tr("Rien de prévu", "Nothing scheduled"), systemImage: "calendar.badge.checkmark")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
             } else {
@@ -196,17 +199,17 @@ private struct CalendarView: View {
                 }
             }
         case .notDetermined:
-            Button("Autoriser l'accès au calendrier") { Task { await module.requestAccess() } }
+            Button(tr("Autoriser l'accès au calendrier", "Allow calendar access")) { Task { await module.requestAccess() } }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(Color.primary.opacity(0.7))
         case .denied:
             Button { module.openPrivacySettings() } label: {
-                Label("Accès refusé : ouvrir les réglages", systemImage: "lock.fill")
+                Label(tr("Accès refusé : ouvrir les réglages", "Access denied: open Settings"), systemImage: "lock.fill")
             }
             .buttonStyle(.plain)
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.white.opacity(0.7))
+            .foregroundStyle(Color.primary.opacity(0.7))
         }
     }
 }
@@ -217,15 +220,17 @@ private struct EventRow: View {
 
     private var timeLabel: String {
         let calendar = Calendar.current
+        let locale = IslandSettings.shared.locale
+        let time = Date.FormatStyle(date: .omitted, time: .shortened).locale(locale)
         var day = ""
         if !calendar.isDateInToday(event.start) {
             day = calendar.isDateInTomorrow(event.start)
-                ? "Demain "
-                : event.start.formatted(.dateTime.weekday(.abbreviated)).capitalizingFirstLetter + " "
+                ? tr("Demain ", "Tomorrow ")
+                : event.start.formatted(.dateTime.locale(locale).weekday(.abbreviated)).capitalizingFirstLetter + " "
         }
-        if event.isAllDay { return day + "Journée" }
-        if event.start <= .now { return "En cours · fin \(event.end.formatted(date: .omitted, time: .shortened))" }
-        return day + event.start.formatted(date: .omitted, time: .shortened)
+        if event.isAllDay { return day + tr("Journée", "All day") }
+        if event.start <= .now { return tr("En cours · fin \(event.end.formatted(time))", "Now · ends \(event.end.formatted(time))") }
+        return day + event.start.formatted(time)
     }
 
     var body: some View {
@@ -236,7 +241,7 @@ private struct EventRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(event.title)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.primary)
                     .lineLimit(1)
                 HStack(spacing: 4) {
                     Text(timeLabel)
@@ -245,7 +250,7 @@ private struct EventRow: View {
                     }
                 }
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Color.primary.opacity(0.55))
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -259,11 +264,13 @@ private struct CalendarSettingsView: View {
 
     var body: some View {
         if module.access != .granted {
-            SettingsRow("Accès au calendrier",
+            SettingsRow(tr("Accès au calendrier", "Calendar access"),
                         subtitle: module.access == .denied
-                            ? "Refusé. Autorise Island dans Confidentialité et sécurité › Calendriers."
-                            : "Island a besoin de l'accès pour afficher tes événements.") {
-                Button(module.access == .denied ? "Ouvrir les réglages" : "Autoriser") {
+                            ? tr("Refusé. Autorise Island dans Confidentialité et sécurité › Calendriers.",
+                                 "Denied. Allow Island in Privacy & Security › Calendars.")
+                            : tr("Island a besoin de l'accès pour afficher tes événements.",
+                                 "Island needs access to show your events.")) {
+                Button(module.access == .denied ? tr("Ouvrir les réglages", "Open Settings") : tr("Autoriser", "Allow")) {
                     if module.access == .denied {
                         module.openPrivacySettings()
                     } else {
@@ -272,25 +279,25 @@ private struct CalendarSettingsView: View {
                 }
             }
         }
-        StepperRow("Événements affichés", value: $module.maxEvents, range: 1...5)
-        PickerRow("Période", selection: $module.daysAhead) {
-            Text("Aujourd'hui").tag(1.0)
-            Text("2 jours").tag(2.0)
-            Text("Semaine").tag(7.0)
+        StepperRow(tr("Événements affichés", "Events shown"), value: $module.maxEvents, range: 1...5)
+        PickerRow(tr("Période", "Range"), selection: $module.daysAhead) {
+            Text(tr("Aujourd'hui", "Today")).tag(1.0)
+            Text(tr("2 jours", "2 days")).tag(2.0)
+            Text(tr("Semaine", "Week")).tag(7.0)
         }
-        ToggleRow("Événements sur la journée", isOn: $module.showAllDay)
-        ToggleRow("Afficher le lieu", isOn: $module.showLocation)
-        PickerRow("Rappel avant le début",
-                  subtitle: "Activité en direct autour de l'encoche.",
+        ToggleRow(tr("Événements sur la journée", "All-day events"), isOn: $module.showAllDay)
+        ToggleRow(tr("Afficher le lieu", "Show location"), isOn: $module.showLocation)
+        PickerRow(tr("Rappel avant le début", "Reminder before start"),
+                  subtitle: tr("Activité en direct autour de l'encoche.", "Live activity around the notch."),
                   selection: $module.alertMinutesBefore) {
-            Text("Non").tag(0.0)
+            Text(tr("Non", "Off")).tag(0.0)
             Text("1 min").tag(1.0)
             Text("5 min").tag(5.0)
             Text("10 min").tag(10.0)
             Text("15 min").tag(15.0)
         }
         if !module.calendars.isEmpty {
-            SettingsSubheader("Calendriers affichés")
+            SettingsSubheader(tr("Calendriers affichés", "Calendars shown"))
         }
         ForEach(module.calendars) { calendar in
             ToggleRow(calendar.title, subtitle: calendar.source, leadingColor: calendar.color, isOn: Binding(

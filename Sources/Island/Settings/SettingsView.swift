@@ -52,6 +52,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 900, minHeight: 620)
         .ignoresSafeArea()
+        .environment(\.locale, IslandSettings.shared.locale)
     }
 }
 
@@ -75,7 +76,7 @@ private struct SettingsSidebar: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Island").font(.system(size: 15, weight: .bold))
-                    Text("Réglages").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    Text(tr("Réglages", "Settings")).font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 20)
@@ -84,11 +85,11 @@ private struct SettingsSidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 3) {
-                    SidebarItem(page: .general, title: "Général", systemImage: "gearshape.fill", tint: .gray)
-                    SidebarItem(page: .appearance, title: "Apparence", systemImage: "paintbrush.pointed.fill", tint: .blue)
-                    SidebarItem(page: .activities, title: "Activités en direct", systemImage: "bolt.fill", tint: .orange)
+                    SidebarItem(page: .general, title: tr("Général", "General"), systemImage: "gearshape.fill", tint: .gray)
+                    SidebarItem(page: .appearance, title: tr("Apparence", "Appearance"), systemImage: "paintbrush.pointed.fill", tint: .blue)
+                    SidebarItem(page: .activities, title: tr("Activités en direct", "Live Activities"), systemImage: "bolt.fill", tint: .orange)
 
-                    Text("Modules")
+                    Text(tr("Modules", "Modules"))
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 12)
@@ -109,7 +110,7 @@ private struct SettingsSidebar: View {
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Label("Quitter Island", systemImage: "power")
+                Label(tr("Quitter Island", "Quit Island"), systemImage: "power")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -145,7 +146,7 @@ private struct SidebarItem: View {
                 Circle()
                     .fill(isOn ? Color.green : Color.primary.opacity(0.15))
                     .frame(width: 6, height: 6)
-                    .help(isOn ? "Activé" : "Désactivé")
+                    .help(isOn ? tr("Activé", "On") : tr("Désactivé", "Off"))
             }
         }
         .padding(.horizontal, 9)
@@ -207,32 +208,40 @@ private struct GeneralPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 32) {
-            PageHeader("Général", subtitle: "Comment l'île s'ouvre, où elle s'affiche.",
+            PageHeader(tr("Général", "General"), subtitle: tr("Comment l'île s'ouvre, où elle s'affiche.", "How the island opens and where it appears."),
                        systemImage: "gearshape.fill", tint: .gray)
 
-            SettingsCard("Ouverture") {
-                PickerRow("Ouvrir l'île au", selection: $settings.expandTrigger) {
+            SettingsCard(tr("Langue", "Language")) {
+                PickerRow(tr("Langue de l'app", "App language"),
+                          subtitle: tr("« Système » suit la langue de macOS.", "“System” follows the macOS language."),
+                          selection: $settings.language) {
+                    ForEach(AppLanguage.allCases) { Text($0.label).tag($0) }
+                }
+            }
+
+            SettingsCard(tr("Ouverture", "Opening")) {
+                PickerRow(tr("Ouvrir l'île au", "Open the island on"), selection: $settings.expandTrigger) {
                     ForEach(ExpandTrigger.allCases) { Text($0.label).tag($0) }
                 }
                 if settings.expandTrigger == .hover {
-                    SliderRow("Délai d'ouverture", subtitle: "Évite les ouvertures en passant vers la barre des menus.",
+                    SliderRow(tr("Délai d'ouverture", "Open delay"), subtitle: tr("Évite les ouvertures en passant vers la barre des menus.", "Avoids opening when heading to the menu bar."),
                               value: $settings.hoverDelay, range: 0...1, step: 0.05, format: Self.seconds)
                 }
-                SliderRow("Délai de fermeture", value: $settings.collapseDelay, range: 0...1.5, step: 0.05, format: Self.seconds)
-                ToggleRow("Retour haptique", subtitle: "Petite vibration du trackpad à l'ouverture.", isOn: $settings.hapticFeedback)
+                SliderRow(tr("Délai de fermeture", "Close delay"), value: $settings.collapseDelay, range: 0...1.5, step: 0.05, format: Self.seconds)
+                ToggleRow(tr("Retour haptique", "Haptic feedback"), subtitle: tr("Petite vibration du trackpad à l'ouverture.", "A light trackpad tap when it opens."), isOn: $settings.hapticFeedback)
             }
 
-            SettingsCard("Affichage") {
-                ToggleRow("Écrans sans encoche", subtitle: "Affiche aussi une île sur les écrans externes.",
+            SettingsCard(tr("Affichage", "Display")) {
+                ToggleRow(tr("Écrans sans encoche", "Screens without a notch"), subtitle: tr("Affiche aussi une île sur les écrans externes.", "Also shows an island on external displays."),
                           isOn: $settings.showOnScreensWithoutNotch)
-                ToggleRow("Icône dans la barre des menus",
-                          subtitle: settings.showMenuBarIcon ? nil : "Clic droit sur l'île ou relance l'app pour revenir ici.",
+                ToggleRow(tr("Icône dans la barre des menus", "Menu bar icon"),
+                          subtitle: settings.showMenuBarIcon ? nil : tr("Clic droit sur l'île ou relance l'app pour revenir ici.", "Right-click the island or relaunch the app to come back here."),
                           isOn: $settings.showMenuBarIcon)
             }
 
-            SettingsCard("Système", footer: launchAtLogin.error) {
-                ToggleRow("Lancer à l'ouverture de session",
-                          subtitle: "Nécessite que l'app soit installée (scripts/build-app.sh --install).",
+            SettingsCard(tr("Système", "System"), footer: launchAtLogin.error) {
+                ToggleRow(tr("Lancer à l'ouverture de session", "Launch at login"),
+                          subtitle: tr("Nécessite que l'app soit installée (scripts/build-app.sh --install).", "Requires the app to be installed (scripts/build-app.sh --install)."),
                           isOn: $launchAtLogin.isEnabled)
             }
         }
@@ -248,24 +257,56 @@ private struct AppearancePage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 32) {
-            PageHeader("Apparence", subtitle: "Taille, forme et animation de l'île ouverte.",
+            PageHeader(tr("Apparence", "Appearance"), subtitle: tr("Taille, forme et animation de l'île ouverte.", "Size, shape and animation of the open island."),
                        systemImage: "paintbrush.pointed.fill", tint: .blue) {
-                Button("Réinitialiser") { settings.resetAppearance() }
+                Button(tr("Réinitialiser", "Reset")) { settings.resetAppearance() }
                     .controlSize(.small)
             }
 
             IslandPreview()
 
-            SettingsCard("Dimensions") {
-                SliderRow("Largeur", value: $settings.expandedWidth, range: 400...860, step: 10) { "\(Int($0)) pt" }
-                SliderRow("Hauteur", value: $settings.expandedHeight, range: 120...320, step: 5) { "\(Int($0)) pt" }
-                SliderRow("Arrondi", value: $settings.expandedCornerRadius, range: 8...48, step: 1) { "\(Int($0)) pt" }
-                ToggleRow("Ombre portée", isOn: $settings.showShadow)
+            SettingsCard(tr("Couleur", "Color"), footer: tr("Fermée, l'île reste noire pour se fondre dans l'encoche de la caméra.", "When closed, the island stays black to blend into the camera notch.")) {
+                SettingsRow(tr("Couleur de l'île ouverte", "Open island color"), subtitle: settings.islandColor.label) {
+                    HStack(spacing: 10) {
+                        ForEach(IslandColor.allCases) { option in
+                            ColorSwatch(option: option, isSelected: settings.islandColor == option) {
+                                withAnimation(.smooth(duration: 0.25)) { settings.islandColor = option }
+                            }
+                        }
+                    }
+                }
+                PickerRow(tr("Matière", "Material"),
+                          subtitle: IslandMaterial.isGlassAvailable
+                              ? tr("Liquid Glass laisse deviner ce qu'il y a derrière l'île.", "Liquid Glass lets what's behind the island show through.")
+                              : tr("Liquid Glass nécessite macOS 26 ou plus récent.", "Liquid Glass requires macOS 26 or later."),
+                          selection: $settings.islandMaterial) {
+                    Text(tr("Opaque", "Opaque")).tag(IslandMaterial.solid)
+                    Text("Liquid Glass").tag(IslandMaterial.glass)
+                }
+                .disabled(!IslandMaterial.isGlassAvailable)
+                if settings.usesGlass {
+                    PickerRow(tr("Verre", "Glass"), subtitle: tr("Clair est plus transparent, Standard plus diffus.", "Clear is more transparent, Standard more diffuse."),
+                              selection: $settings.glassVariant) {
+                        Text(tr("Standard", "Standard")).tag(GlassVariant.regular)
+                        Text(tr("Clair", "Clear")).tag(GlassVariant.clear)
+                    }
+                    SliderRow(tr("Teinte", "Tint"), subtitle: tr("Quantité de couleur posée sur le verre.", "How much color is applied to the glass."),
+                              value: $settings.glassTint, range: 0...1, step: 0.05) { "\(Int($0 * 100)) %" }
+                }
             }
 
-            SettingsCard("Animation") {
-                SliderRow("Durée", value: $settings.animationResponse, range: 0.15...1, step: 0.01) { String(format: "%.2f s", $0) }
-                SliderRow("Rebond", subtitle: "0 = aucun, plus haut = plus élastique.",
+            SettingsCard(tr("Dimensions", "Size")) {
+                SliderRow(tr("Largeur", "Width"), value: $settings.expandedWidth, range: 400...860, step: 10) { "\(Int($0)) pt" }
+                SliderRow(tr("Hauteur", "Height"), value: $settings.expandedHeight, range: 120...320, step: 5) { "\(Int($0)) pt" }
+                SliderRow(tr("Arrondi", "Corner radius"), value: $settings.expandedCornerRadius, range: 8...48, step: 1) { "\(Int($0)) pt" }
+                ToggleRow(tr("Ombre portée", "Drop shadow"), isOn: $settings.showShadow)
+                ToggleRow(tr("Séparateurs entre widgets", "Widget separators"), subtitle: tr("Filets verticaux entre les éléments de l'accueil.", "Vertical lines between home items."),
+                          isOn: $settings.showWidgetSeparators)
+            }
+
+            SettingsCard(tr("Animation", "Animation")) {
+                SliderRow(tr("Durée", "Duration"), value: $settings.animationResponse, range: 0.15...1, step: 0.01) { String(format: "%.2f s", $0) }
+                SliderRow(tr("Rebond", "Bounce"), subtitle: tr("0 = aucun, plus haut = plus élastique.", "0 = none, higher = springier."),
                           value: $settings.animationBounce, range: 0...0.5, step: 0.01) { "\(Int($0 * 100)) %" }
             }
         }
@@ -299,15 +340,17 @@ private struct IslandPreview: View {
                 .frame(height: notch.height * scale)
                 .frame(maxHeight: .infinity, alignment: .top)
 
-            NotchShape(topRadius: topRadius,
-                       bottomRadius: (expanded ? settings.expandedCornerRadius : NotchViewModel.collapsedBottomRadius) * scale)
-                .fill(.black)
+            IslandBackground(shape: NotchShape(topRadius: topRadius,
+                                               bottomRadius: (expanded ? settings.expandedCornerRadius
+                                                   : NotchViewModel.collapsedBottomRadius) * scale),
+                             isExpanded: expanded)
                 .frame(width: size.width, height: size.height)
                 .overlay(alignment: .top) {
                     if expanded {
                         HStack(spacing: 10) {
                             ForEach(0..<3) { _ in
-                                RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.14))
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(settings.islandColor.isDark ? Color.white.opacity(0.14) : Color.black.opacity(0.1))
                             }
                         }
                         .padding(.horizontal, 22 * scale + topRadius)
@@ -334,11 +377,11 @@ private struct IslandPreview: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Rejouer l'animation")
+                .help(tr("Rejouer l'animation", "Replay animation"))
 
                 Picker("", selection: Binding(get: { navigation.previewExpanded }, set: { navigation.previewExpanded = $0 })) {
-                    Text("Fermée").tag(false)
-                    Text("Ouverte").tag(true)
+                    Text(tr("Fermée", "Closed")).tag(false)
+                    Text(tr("Ouverte", "Open")).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -352,6 +395,27 @@ private struct IslandPreview: View {
     }
 }
 
+/// Pastille de couleur sélectionnable.
+private struct ColorSwatch: View {
+    let option: IslandColor
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Circle()
+                .fill(option.color)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+                .frame(width: 24, height: 24)
+                .padding(3)
+                .overlay(Circle().strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(option.label)
+    }
+}
+
 // MARK: - Activités en direct
 
 private struct ActivitiesPage: View {
@@ -359,33 +423,33 @@ private struct ActivitiesPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 32) {
-            PageHeader("Activités en direct",
-                       subtitle: "Informations brèves qui apparaissent de part et d'autre de l'encoche, sans l'ouvrir.",
+            PageHeader(tr("Activités en direct", "Live Activities"),
+                       subtitle: tr("Informations brèves qui apparaissent de part et d'autre de l'encoche, sans l'ouvrir.", "Short updates shown on either side of the notch, without opening it."),
                        systemImage: "bolt.fill", tint: .orange)
 
-            SettingsCard(footer: "Chaque module règle ensuite ses propres activités dans sa page.") {
-                ToggleRow("Activités en direct", isOn: $settings.liveActivitiesEnabled)
+            SettingsCard(footer: tr("Chaque module règle ensuite ses propres activités dans sa page.", "Each module then configures its own activities on its page.")) {
+                ToggleRow(tr("Activités en direct", "Live Activities"), isOn: $settings.liveActivitiesEnabled)
             }
 
-            SettingsCard("Sources") {
-                SettingsRow("Lecture en cours", subtitle: "Pochette et égaliseur pendant la lecture.",
+            SettingsCard(tr("Sources", "Sources")) {
+                SettingsRow(tr("Lecture en cours", "Now Playing"), subtitle: tr("Pochette et égaliseur pendant la lecture.", "Artwork and equalizer while playing."),
                             icon: ("music.note", .pink)) { EmptyView() }
-                SettingsRow("Volume & luminosité", subtitle: "Jauge à chaque changement.",
+                SettingsRow(tr("Volume & luminosité", "Volume & Brightness"), subtitle: tr("Jauge à chaque changement.", "A gauge on every change."),
                             icon: ("speaker.wave.2.fill", .blue)) { EmptyView() }
-                SettingsRow("Caméra & micro", subtitle: "Points vert et orange pendant l'utilisation.",
+                SettingsRow(tr("Caméra & micro", "Camera & Mic"), subtitle: tr("Points vert et orange pendant l'utilisation.", "Green and orange dots while in use."),
                             icon: ("video.fill", .green)) { EmptyView() }
-                SettingsRow("Batterie", subtitle: "Branchement du chargeur, batterie faible.",
+                SettingsRow(tr("Batterie", "Battery"), subtitle: tr("Branchement du chargeur, batterie faible.", "Charger plugged in, low battery."),
                             icon: ("battery.75percent", .green)) { EmptyView() }
-                SettingsRow("Calendrier", subtitle: "Rappel avant le début d'un événement.",
+                SettingsRow(tr("Calendrier", "Calendar"), subtitle: tr("Rappel avant le début d'un événement.", "Reminder before an event starts."),
                             icon: ("calendar", .red)) { EmptyView() }
             }
 
-            SettingsCard("Essayer", footer: "Regarde l'encoche après avoir cliqué.") {
-                SettingsRow("Exemple de charge") {
-                    Button("Afficher") { showSample(charging: true) }.disabled(!settings.liveActivitiesEnabled)
+            SettingsCard(tr("Essayer", "Try it"), footer: tr("Regarde l'encoche après avoir cliqué.", "Watch the notch after clicking.")) {
+                SettingsRow(tr("Exemple de charge", "Charging example")) {
+                    Button(tr("Afficher", "Show")) { showSample(charging: true) }.disabled(!settings.liveActivitiesEnabled)
                 }
-                SettingsRow("Exemple de rappel") {
-                    Button("Afficher") { showSample(charging: false) }.disabled(!settings.liveActivitiesEnabled)
+                SettingsRow(tr("Exemple de rappel", "Reminder example")) {
+                    Button(tr("Afficher", "Show")) { showSample(charging: false) }.disabled(!settings.liveActivitiesEnabled)
                 }
             }
         }
@@ -401,10 +465,10 @@ private struct ActivitiesPage: View {
             : LiveActivity(id: "sample", duration: 4) {
                 HStack(spacing: 5) {
                     Circle().fill(.orange).frame(width: 7, height: 7)
-                    Text("Réunion").lineLimit(1)
+                    Text(tr("Réunion", "Meeting")).lineLimit(1)
                 }
             } trailing: {
-                Text("dans 5 min").foregroundStyle(.orange)
+                Text(tr("dans 5 min", "in 5 min")).foregroundStyle(.orange)
             }
         ActivityCenter.shared.show(activity)
     }
@@ -422,7 +486,7 @@ private struct ModulePage: View {
         VStack(alignment: .leading, spacing: 32) {
             PageHeader(module.name, subtitle: module.summary, systemImage: module.systemImage, tint: module.tint) {
                 HStack(spacing: 10) {
-                    Text(enabled.wrappedValue ? "Activé" : "Désactivé")
+                    Text(enabled.wrappedValue ? tr("Activé", "On") : tr("Désactivé", "Off"))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                     Toggle("", isOn: enabled)
@@ -431,23 +495,23 @@ private struct ModulePage: View {
                 }
             }
 
-            SettingsCard("Disposition") {
+            SettingsCard(tr("Disposition", "Layout")) {
                 switch module.kind {
                 case .widget:
-                    PositionRow(module: module, title: "Position sur l'accueil", unit: "de gauche à droite")
+                    PositionRow(module: module, title: tr("Position sur l'accueil", "Position on Home"), unit: tr("de gauche à droite", "left to right"))
                 case .page:
-                    PositionRow(module: module, title: "Position de l'onglet",
-                                unit: "parmi les onglets en haut à gauche de l'île ouverte")
+                    PositionRow(module: module, title: tr("Position de l'onglet", "Tab position"),
+                                unit: tr("parmi les onglets en haut à gauche de l'île ouverte", "among the tabs at the top left of the open island"))
                 case .background:
-                    SettingsRow("Autour de l'encoche",
-                                subtitle: "S'affiche sous forme d'activité en direct, pas dans l'île ouverte.") {
+                    SettingsRow(tr("Autour de l'encoche", "Around the notch"),
+                                subtitle: tr("S'affiche sous forme d'activité en direct, pas dans l'île ouverte.", "Shows up as a live activity, not in the open island.")) {
                         Image(systemName: "capsule.fill").foregroundStyle(.secondary)
                     }
                 }
             }
 
             if let settingsView = module.settingsView() {
-                SettingsCard("Réglages") { settingsView }
+                SettingsCard(tr("Réglages", "Settings")) { settingsView }
                     .disabled(!enabled.wrappedValue)
                     .opacity(enabled.wrappedValue ? 1 : 0.5)
             }
@@ -464,7 +528,7 @@ private struct PositionRow: View {
 
     var body: some View {
         let position = registry.position(of: module)
-        SettingsRow(title, subtitle: position.map { "\($0.index) sur \($0.count), \(unit)" }) {
+        SettingsRow(title, subtitle: position.map { tr("\($0.index) sur \($0.count), \(unit)", "\($0.index) of \($0.count), \(unit)") }) {
             ControlGroup {
                 Button { registry.move(module, by: -1) } label: { Image(systemName: "chevron.left") }
                     .disabled(position?.index == 1)

@@ -11,8 +11,8 @@ enum HUDMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .replace: "Remplacer"
-        case .alongside: "En plus"
+        case .replace: tr("Remplacer", "Replace")
+        case .alongside: tr("En plus", "Alongside")
         }
     }
 }
@@ -27,8 +27,8 @@ enum HUDStyle: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .compact: "Compact"
-        case .extended: "Étendu"
+        case .compact: tr("Compact", "Compact")
+        case .extended: tr("Étendu", "Extended")
         }
     }
 }
@@ -41,9 +41,12 @@ enum HUDKind {
 @Observable
 final class SystemHUDModule: IslandModule {
     let id = "hud"
-    let name = "Volume & luminosité"
+    var name: String { tr("Volume & luminosité", "Volume & Brightness") }
     let systemImage = "speaker.wave.2.fill"
-    let summary = "Remplace les fenêtres de volume et de luminosité de macOS par une jauge dans l'encoche."
+    var summary: String {
+        tr("Remplace les fenêtres de volume et de luminosité de macOS par une jauge dans l'encoche.",
+           "Replaces the macOS volume and brightness overlays with a gauge in the notch.")
+    }
     let tint = Color.blue
     let kind = ModuleKind.background
 
@@ -235,7 +238,7 @@ final class SystemHUDModule: IslandModule {
         let percentage = showPercentage
         let icon = Image(systemName: symbol)
             .contentTransition(.symbolEffect(.replace))
-            .foregroundStyle(muted ? .white.opacity(0.5) : .white)
+            .foregroundStyle(muted ? Color.primary.opacity(0.5) : Color.primary)
 
         let activity: LiveActivity
         switch style {
@@ -284,9 +287,9 @@ private struct HUDBar: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.2))
+                Capsule().fill(Color.primary.opacity(0.2))
                 Capsule()
-                    .fill(.white.opacity(dimmed ? 0.4 : 1))
+                    .fill(Color.primary.opacity(dimmed ? 0.4 : 1))
                     .frame(width: proxy.size.width * min(max(value, 0), 1))
             }
         }
@@ -320,43 +323,50 @@ private struct SystemHUDSettingsView: View {
     @Bindable var module: SystemHUDModule
 
     var body: some View {
-        PickerRow("Mode",
+        PickerRow(tr("Mode", "Mode"),
                   subtitle: module.mode == .replace
-                      ? "Intercepte les touches : seul le HUD d'Island s'affiche."
-                      : "Sans permission : le HUD de macOS s'affiche aussi.",
+                      ? tr("Intercepte les touches : seul le HUD d'Island s'affiche.",
+                           "Intercepts the keys: only Island's HUD is shown.")
+                      : tr("Sans permission : le HUD de macOS s'affiche aussi.",
+                           "No permission needed: the macOS HUD is shown too."),
                   selection: $module.mode) {
             ForEach(HUDMode.allCases) { Text($0.label).tag($0) }
         }
         if module.mode == .replace && !module.hasAccessibility {
-            SettingsRow("Permission Accessibilité requise",
-                        subtitle: "Nécessaire pour intercepter les touches volume et luminosité.") {
+            SettingsRow(tr("Permission Accessibilité requise", "Accessibility permission required"),
+                        subtitle: tr("Nécessaire pour intercepter les touches volume et luminosité.",
+                                     "Needed to intercept the volume and brightness keys.")) {
                 HStack {
-                    Button("Autoriser") { module.requestAccessibility() }
-                    Button("Réglages") { module.openAccessibilitySettings() }
+                    Button(tr("Autoriser", "Allow")) { module.requestAccessibility() }
+                    Button(tr("Réglages", "Settings")) { module.openAccessibilitySettings() }
                 }
             }
         } else if module.mode == .replace && module.tapFailed {
-            SettingsRow("Interception impossible",
-                        subtitle: "Retire puis rajoute Island dans Confidentialité › Accessibilité.") {
-                Button("Réglages") { module.openAccessibilitySettings() }
+            SettingsRow(tr("Interception impossible", "Can't intercept keys"),
+                        subtitle: tr("Retire puis rajoute Island dans Confidentialité › Accessibilité.",
+                                     "Remove and re-add Island in Privacy › Accessibility.")) {
+                Button(tr("Réglages", "Settings")) { module.openAccessibilitySettings() }
             }
         }
-        PickerRow("Style", subtitle: module.style == .extended
-                      ? "Barre sous l'encoche, réglable à la souris."
-                      : "Icône et jauge de part et d'autre de l'encoche.",
+        PickerRow(tr("Style", "Style"), subtitle: module.style == .extended
+                      ? tr("Barre sous l'encoche, réglable à la souris.", "Bar below the notch, adjustable with the mouse.")
+                      : tr("Icône et jauge de part et d'autre de l'encoche.", "Icon and gauge on either side of the notch."),
                   selection: $module.style) {
             ForEach(HUDStyle.allCases) { Text($0.label).tag($0) }
         }
-        ToggleRow("Volume", isOn: $module.handlesVolume)
-        ToggleRow("Luminosité", subtitle: DisplayBrightness.isAvailable ? nil : "Indisponible sur cet écran.",
+        ToggleRow(tr("Volume", "Volume"), isOn: $module.handlesVolume)
+        ToggleRow(tr("Luminosité", "Brightness"),
+                  subtitle: DisplayBrightness.isAvailable ? nil : tr("Indisponible sur cet écran.", "Not available on this display."),
                   isOn: $module.handlesBrightness)
-        ToggleRow("Pourcentage", isOn: $module.showPercentage)
-        ToggleRow("Pas fins", subtitle: "Réglage par 1/32 au lieu de 1/16 (mode Remplacer).", isOn: $module.fineSteps)
-        SliderRow("Durée d'affichage", value: $module.duration, range: 0.8...4, step: 0.1) { String(format: "%.1f s", $0) }
-        SettingsRow("Essayer") {
+        ToggleRow(tr("Pourcentage", "Percentage"), isOn: $module.showPercentage)
+        ToggleRow(tr("Pas fins", "Fine steps"),
+                  subtitle: tr("Réglage par 1/32 au lieu de 1/16 (mode Remplacer).", "Adjust in 1/32 steps instead of 1/16 (Replace mode)."),
+                  isOn: $module.fineSteps)
+        SliderRow(tr("Durée d'affichage", "Display duration"), value: $module.duration, range: 0.8...4, step: 0.1) { String(format: "%.1f s", $0) }
+        SettingsRow(tr("Essayer", "Try it")) {
             HStack {
-                Button("Volume") { module.showHUD(.volume) }
-                Button("Luminosité") { module.showHUD(.brightness) }
+                Button(tr("Volume", "Volume")) { module.showHUD(.volume) }
+                Button(tr("Luminosité", "Brightness")) { module.showHUD(.brightness) }
             }
         }
     }

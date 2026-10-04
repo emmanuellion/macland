@@ -20,8 +20,8 @@ enum ShelfStorageMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .reference: "Référence"
-        case .copy: "Copie"
+        case .reference: tr("Référence", "Reference")
+        case .copy: tr("Copie", "Copy")
         }
     }
 }
@@ -30,9 +30,12 @@ enum ShelfStorageMode: String, CaseIterable, Identifiable {
 @Observable
 final class ShelfModule: FileDropReceiving {
     let id = "shelf"
-    let name = "Étagère"
+    var name: String { tr("Étagère", "Shelf") }
     let systemImage = "tray.full.fill"
-    let summary = "Dépose des fichiers sur l'encoche pour les garder sous la main, puis glisse-les ailleurs ou envoie-les par AirDrop."
+    var summary: String {
+        tr("Dépose des fichiers sur l'encoche pour les garder sous la main, puis glisse-les ailleurs ou envoie-les par AirDrop.",
+           "Drop files on the notch to keep them handy, then drag them elsewhere or send them with AirDrop.")
+    }
     let tint = Color.indigo
     let kind = ModuleKind.page
 
@@ -126,7 +129,7 @@ final class ShelfModule: FileDropReceiving {
                 ActivityCenter.shared.show(LiveActivity(id: "shelf.error", priority: 3, duration: 3) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 } trailing: {
-                    Text("Échec").foregroundStyle(.orange)
+                    Text(tr("Échec", "Failed")).foregroundStyle(.orange)
                 })
             }
         }
@@ -251,7 +254,7 @@ private struct ShelfView: View {
         HStack(spacing: 12) {
             if module.items.isEmpty {
                 DropZone(systemImage: "tray.and.arrow.down.fill",
-                         title: "Dépose des fichiers ici",
+                         title: tr("Dépose des fichiers ici", "Drop files here"),
                          isTargeted: module.isDropTargeted)
             } else {
                 ScrollView(.horizontal) {
@@ -266,13 +269,13 @@ private struct ShelfView: View {
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(.white.opacity(module.isDropTargeted ? 0.5 : 0), lineWidth: 1.5)
+                        .strokeBorder(Color.primary.opacity(module.isDropTargeted ? 0.5 : 0), lineWidth: 1.5)
                 )
             }
 
             if module.showAirDropZone {
                 DropZone(systemImage: "dot.radiowaves.left.and.right",
-                         title: module.items.isEmpty ? "AirDrop" : "Tout envoyer",
+                         title: module.items.isEmpty ? "AirDrop" : tr("Tout envoyer", "Send all"),
                          isTargeted: module.isAirDropTargeted)
                     .frame(width: 96)
                     .onTapGesture { module.airDrop(module.items.map(\.url)) }
@@ -282,7 +285,8 @@ private struct ShelfView: View {
                     )) { providers in
                         module.airDrop(providers)
                     }
-                    .help("Dépose des fichiers ici pour les envoyer par AirDrop, ou clique pour envoyer tout le contenu de l'étagère")
+                    .help(tr("Dépose des fichiers ici pour les envoyer par AirDrop, ou clique pour envoyer tout le contenu de l'étagère",
+                             "Drop files here to send them with AirDrop, or click to send everything on the shelf"))
             }
         }
     }
@@ -301,12 +305,12 @@ private struct DropZone: View {
                 .font(.system(size: 11, weight: .medium))
                 .multilineTextAlignment(.center)
         }
-        .foregroundStyle(.white.opacity(isTargeted ? 1 : 0.55))
+        .foregroundStyle(Color.primary.opacity(isTargeted ? 1 : 0.55))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(.white.opacity(isTargeted ? 0.12 : 0.04))
-                .strokeBorder(.white.opacity(isTargeted ? 0.5 : 0.18), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                .fill(Color.primary.opacity(isTargeted ? 0.12 : 0.04))
+                .strokeBorder(Color.primary.opacity(isTargeted ? 0.5 : 0.18), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
         )
         .contentShape(RoundedRectangle(cornerRadius: 14))
         .animation(.smooth(duration: 0.2), value: isTargeted)
@@ -335,18 +339,18 @@ private struct ShelfItemView: View {
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Color.primary.opacity(0.85))
                 .frame(width: 70)
         }
         .padding(6)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(isHovered ? 0.1 : 0)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(isHovered ? 0.1 : 0)))
         .overlay(alignment: .topTrailing) {
             if isHovered {
                 Button { module.remove(item) } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .gray)
+                        .foregroundStyle(.primary, .gray)
                 }
                 .buttonStyle(.plain)
                 .offset(x: 2, y: -2)
@@ -357,25 +361,25 @@ private struct ShelfItemView: View {
         .onTapGesture(count: 2) { module.open(item) }
         .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
         .contextMenu {
-            Button("Ouvrir") { module.open(item) }
-            Button("Afficher dans le Finder") { module.revealInFinder(item) }
-            Button("Envoyer par AirDrop") { module.airDrop([item.url]) }
-            Button("Copier") { FileActions.copyToPasteboard([item.url]) }
+            Button(tr("Ouvrir", "Open")) { module.open(item) }
+            Button(tr("Afficher dans le Finder", "Show in Finder")) { module.revealInFinder(item) }
+            Button(tr("Envoyer par AirDrop", "Send with AirDrop")) { module.airDrop([item.url]) }
+            Button(tr("Copier", "Copy")) { FileActions.copyToPasteboard([item.url]) }
             Divider()
-            Button("Compresser en .zip") { module.perform { try await FileActions.zip([item.url]) } }
+            Button(tr("Compresser en .zip", "Compress to .zip")) { module.perform { try await FileActions.zip([item.url]) } }
             if FileActions.isImage(item.url) {
-                Menu("Convertir en") {
+                Menu(tr("Convertir en", "Convert to")) {
                     ForEach(FileActions.ImageFormat.allCases, id: \.self) { format in
                         Button(format.label) { module.perform { try await FileActions.convert(item.url, to: format) } }
                     }
                 }
             }
             if module.items.count > 1 {
-                Button("Tout compresser en .zip") { module.perform { try await FileActions.zip(module.items.map(\.url)) } }
+                Button(tr("Tout compresser en .zip", "Compress all to .zip")) { module.perform { try await FileActions.zip(module.items.map(\.url)) } }
             }
             Divider()
-            Button("Retirer de l'étagère") { module.remove(item) }
-            Button("Vider l'étagère") { module.removeAll() }
+            Button(tr("Retirer de l'étagère", "Remove from shelf")) { module.remove(item) }
+            Button(tr("Vider l'étagère", "Clear shelf")) { module.removeAll() }
         }
         .help(item.url.path)
     }
@@ -387,20 +391,24 @@ private struct ShelfSettingsView: View {
     @Bindable var module: ShelfModule
 
     var body: some View {
-        PickerRow("Stockage des fichiers",
+        PickerRow(tr("Stockage des fichiers", "File storage"),
                   subtitle: module.storageMode == .reference
-                      ? "L'étagère pointe vers le fichier d'origine."
-                      : "Une copie est gardée, même si l'original est supprimé.",
+                      ? tr("L'étagère pointe vers le fichier d'origine.", "The shelf points to the original file.")
+                      : tr("Une copie est gardée, même si l'original est supprimé.", "A copy is kept, even if the original is deleted."),
                   selection: $module.storageMode) {
             ForEach(ShelfStorageMode.allCases) { Text($0.label).tag($0) }
         }
-        ToggleRow("Conserver après redémarrage", subtitle: "Retrouver le contenu de l'étagère au prochain lancement.",
+        ToggleRow(tr("Conserver après redémarrage", "Keep after restart"),
+                  subtitle: tr("Retrouver le contenu de l'étagère au prochain lancement.", "Restore the shelf contents on next launch."),
                   isOn: $module.persistItems)
-        ToggleRow("Zone AirDrop", subtitle: "Affiche une zone de dépôt pour envoyer directement par AirDrop.",
+        ToggleRow(tr("Zone AirDrop", "AirDrop zone"),
+                  subtitle: tr("Affiche une zone de dépôt pour envoyer directement par AirDrop.", "Shows a drop zone to send straight with AirDrop."),
                   isOn: $module.showAirDropZone)
-        ToggleRow("Retirer après un envoi AirDrop", isOn: $module.removeAfterAirDrop)
-        SettingsRow("Contenu actuel", subtitle: "\(module.items.count) élément\(module.items.count > 1 ? "s" : "")") {
-            Button("Vider", role: .destructive) { module.removeAll() }
+        ToggleRow(tr("Retirer après un envoi AirDrop", "Remove after AirDrop"), isOn: $module.removeAfterAirDrop)
+        SettingsRow(tr("Contenu actuel", "Current contents"),
+                    subtitle: tr("\(module.items.count) élément\(module.items.count > 1 ? "s" : "")",
+                                 "\(module.items.count) item\(module.items.count == 1 ? "" : "s")")) {
+            Button(tr("Vider", "Clear"), role: .destructive) { module.removeAll() }
                 .disabled(module.items.isEmpty)
         }
     }

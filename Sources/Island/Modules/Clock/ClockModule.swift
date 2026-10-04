@@ -4,9 +4,9 @@ import SwiftUI
 @Observable
 final class ClockModule: IslandModule {
     let id = "clock"
-    let name = "Date & heure"
+    var name: String { tr("Date & heure", "Date & Time") }
     let systemImage = "clock"
-    let summary = "Affiche l'heure et la date du jour."
+    var summary: String { tr("Affiche l'heure et la date du jour.", "Shows the current time and date.") }
     let tint = Color.gray
 
     @ObservationIgnored private let store = ModuleDefaults(moduleID: "clock", registering: [
@@ -32,23 +32,30 @@ final class ClockModule: IslandModule {
 private struct ClockView: View {
     let module: ClockModule
 
+    /// Format explicite : le format « 2 chiffres » de la locale anglaise repasse en 12 h.
+    private func time(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = IslandSettings.shared.locale
+        let seconds = module.showSeconds ? ":ss" : ""
+        formatter.dateFormat = module.use24Hour ? "HH:mm\(seconds)" : "h:mm\(seconds) a"
+        return formatter.string(from: date)
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: 2) {
-                Text(context.date.formatted(.dateTime.locale(.current)
-                    .hour(module.use24Hour ? .twoDigits(amPM: .omitted) : .defaultDigits(amPM: .abbreviated))
-                    .minute(.twoDigits)
-                    .second(module.showSeconds ? .twoDigits : .omitted)))
+                Text(time(context.date))
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
                 if module.showDate {
-                    Text(context.date.formatted(.dateTime.weekday(.wide).day().month(.wide)).capitalizingFirstLetter)
+                    Text(context.date.formatted(.dateTime.locale(IslandSettings.shared.locale).weekday(.wide).day().month(.wide))
+                        .capitalizingFirstLetter)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.primary)
         }
     }
 }
@@ -57,9 +64,9 @@ private struct ClockSettingsView: View {
     @Bindable var module: ClockModule
 
     var body: some View {
-        ToggleRow("Format 24 heures", isOn: $module.use24Hour)
-        ToggleRow("Afficher les secondes", isOn: $module.showSeconds)
-        ToggleRow("Afficher la date", isOn: $module.showDate)
+        ToggleRow(tr("Format 24 heures", "24-hour time"), isOn: $module.use24Hour)
+        ToggleRow(tr("Afficher les secondes", "Show seconds"), isOn: $module.showSeconds)
+        ToggleRow(tr("Afficher la date", "Show date"), isOn: $module.showDate)
     }
 }
 

@@ -38,16 +38,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         observe { [weak self] in
             guard let self else { return }
+            // La langue est lue ici pour reconstruire le menu quand elle change.
+            _ = settings.isFrench
             updateStatusItem(visible: settings.showMenuBarIcon)
         }
 
         #if DEBUG
         // Les tests utilisent aussi --snapshots <dossier> pour leurs captures.
         let arguments = CommandLine.arguments
+        applyDebugOverrides(arguments)
         if arguments.contains("--test-scrub") {
             runScrubTest()
         } else if arguments.contains("--test-pause") {
             runPauseTest()
+        } else if arguments.contains("--record") {
+            runRecording()
         } else if arguments.contains("--test-files") {
             runFileActionsTest()
         } else if arguments.contains("--test-system") {
@@ -157,6 +162,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// --island-color <couleur>, --language <langue> : réglages forcés le temps d'une capture,
+    /// remis à leur valeur précédente à la fermeture.
+    private func applyDebugOverrides(_ arguments: [String]) {
+        func value(_ flag: String) -> String? {
+            guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
+            return arguments[index + 1]
+        }
+        let previousColor = settings.islandColor
+        let previousLanguage = settings.language
+        if let color = value("--island-color").flatMap(IslandColor.init(rawValue:)) { settings.islandColor = color }
+        if let language = value("--language").flatMap(AppLanguage.init(rawValue:)) { settings.language = language }
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                IslandSettings.shared.islandColor = previousColor
+                IslandSettings.shared.language = previousLanguage
+            }
+        }
+    }
+
+    /// Images et GIF du README : une séquence scénarisée, filmée image par image (20 i/s).
+    private func runRecording() {
+        guard let directory = DebugSnapshots.directory, let controller = notchControllers.first,
+              let hud = ModuleRegistry.shared.module(id: "hud") as? SystemHUDModule else { return }
+        var frames: [CGImage] = []
+        let recorder = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                if let frame = controller.debugMediaFrame() { frames.append(DebugMedia.downscaled(frame, by: 2)) }
+            }
+        }
+        let still = { (name: String) in
+            if let frame = controller.debugMediaFrame() {
+                DebugMedia.writePNG(frame, to: directory.appending(path: "\(name).png"))
+            }
+        }
+        let steps: [(Double, () -> Void)] = [
+            (1.0, { controller.debugExpand(page: NotchViewModel.homePage) }),
+            (2.4, { still("home") }),
+            (2.8, { controller.debugSelect(page: "clipboard") }),
+            (3.6, { still("clipboard") }),
+            (4.0, { controller.debugSelect(page: "controls") }),
+            (4.8, { still("controls") }),
+            (5.2, { controller.debugSelect(page: "shelf") }),
+            (6.0, { still("shelf") }),
+            (6.4, { controller.debugSelect(page: NotchViewModel.homePage) }),
+            (7.4, { controller.debugCollapse() }),
+            (8.4, { hud.showHUD(.brightness) }),
+            (9.0, { still("hud") }),
+            (10.2, { recorder.invalidate() }),
+        ]
+        for (time, action) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + time) { action() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.5) {
+            DebugMedia.writeGIF(frames, delay: 0.05, to: directory.appending(path: "demo.gif"))
+            debugLog("GIF : \(frames.count) images")
+            NSApp.terminate(nil)
+        }
+    }
+
     private func runSnapshots() {
         let pages: [(String, SettingsPage)] = [("general", .general), ("appearance", .appearance), ("activities", .activities)]
             + ModuleRegistry.shared.allModules.map { ("module-\($0.id)", .module($0.id)) }
@@ -179,6 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + end + 2) { [weak self] in
             self?.notchControllers.first?.debugCapture(name: "notch-clipboard")
+            self?.notchControllers.first?.debugExpand(page: "controls")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + end + 2.6) { [weak self] in
+            self?.notchControllers.first?.debugCapture(name: "notch-controls")
             self?.notchControllers.first?.debugCollapse()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + end + 3) { [weak self] in
@@ -215,16 +283,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem = nil
             return
         }
-        guard statusItem == nil else { return }
-
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = statusItem ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "capsule.fill", accessibilityDescription: "Island")
         item.button?.image?.isTemplate = true
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Réglages…", action: #selector(openSettingsAction), keyEquivalent: ",").target = self
+        menu.addItem(withTitle: tr("Réglages…", "Settings…"), action: #selector(openSettingsAction), keyEquivalent: ",").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quitter Island", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: tr("Quitter Island", "Quit Island"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
         statusItem = item
     }
@@ -236,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
-            window.title = "Réglages d'Island"
+            window.title = tr("Réglages d'Island", "Island Settings")
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden

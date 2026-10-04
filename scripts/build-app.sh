@@ -27,6 +27,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --arch arm64 --show-bin-path)/Island" "$APP/Contents/MacOS/Island"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
 # Adaptateur MediaRemote (lecture en cours) : framework chargé par /usr/bin/perl, pas lié à l'app.
 ADAPTER="$ROOT/Vendor/mediaremote-adapter"

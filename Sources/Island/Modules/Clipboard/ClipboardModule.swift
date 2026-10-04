@@ -25,11 +25,11 @@ enum ClipboardFilter: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .all: "Tout"
-        case .text: "Texte"
-        case .images: "Images"
-        case .files: "Fichiers"
-        case .pinned: "Épinglés"
+        case .all: tr("Tout", "All")
+        case .text: tr("Texte", "Text")
+        case .images: tr("Images", "Images")
+        case .files: tr("Fichiers", "Files")
+        case .pinned: tr("Épinglés", "Pinned")
         }
     }
 
@@ -51,7 +51,7 @@ enum ClipboardShortcut: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .off: "Aucun"
+        case .off: tr("Aucun", "None")
         case .controlCommandV: "⌃⌘V"
         case .optionCommandV: "⌥⌘V"
         case .shiftCommandV: "⇧⌘V"
@@ -72,9 +72,12 @@ enum ClipboardShortcut: String, CaseIterable, Identifiable {
 @Observable
 final class ClipboardModule: IslandModule {
     let id = "clipboard"
-    let name = "Presse-papiers"
+    var name: String { tr("Presse-papiers", "Clipboard") }
     let systemImage = "doc.on.clipboard.fill"
-    let summary = "Historique de ce que tu copies : clique sur un élément pour le recopier."
+    var summary: String {
+        tr("Historique de ce que tu copies : clique sur un élément pour le recopier.",
+           "History of what you copy: click an item to copy it again.")
+    }
     let tint = Color.teal
     let kind = ModuleKind.page
 
@@ -149,6 +152,23 @@ final class ClipboardModule: IslandModule {
     func settingsView() -> AnyView? { AnyView(ClipboardSettingsView(module: self)) }
 
     func start() {
+        #if DEBUG
+        // Historique fictif pour les captures publiques : rien n'est lu ni enregistré sur le disque.
+        if CommandLine.arguments.contains("--demo-media") {
+            let now = Date.now
+            items = [
+                ClipboardItem(id: UUID(), kind: .text, text: "Ship the island redesign 🚀", date: now.addingTimeInterval(-40),
+                              sourceBundleID: "com.apple.Notes"),
+                ClipboardItem(id: UUID(), kind: .text, text: "https://github.com/emmanuellion/macland",
+                              date: now.addingTimeInterval(-300), sourceBundleID: "com.apple.Safari", isPinned: true),
+                ClipboardItem(id: UUID(), kind: .files, fileURLs: [URL(filePath: "/System/Applications/Music.app")],
+                              date: now.addingTimeInterval(-1500), sourceBundleID: "com.apple.finder"),
+                ClipboardItem(id: UUID(), kind: .text, text: "#8E7CFF", date: now.addingTimeInterval(-4000),
+                              sourceBundleID: "com.apple.TextEdit"),
+            ]
+            return
+        }
+        #endif
         if !didLoad {
             didLoad = true
             load()
@@ -295,7 +315,7 @@ final class ClipboardModule: IslandModule {
     /// Ouvre un sélecteur d'app à ajouter aux apps ignorées.
     func chooseAppToIgnore() {
         let panel = NSOpenPanel()
-        panel.title = "Choisir une app à ignorer"
+        panel.title = tr("Choisir une app à ignorer", "Choose an app to ignore")
         panel.directoryURL = URL(filePath: "/Applications")
         panel.allowedContentTypes = [.application]
         panel.allowsMultipleSelection = true
@@ -392,10 +412,10 @@ private struct ClipboardView: View {
                     } label: {
                         Text(filter.label)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(module.filter == filter ? .black : .white.opacity(0.6))
+                            .foregroundStyle(module.filter == filter ? AnyShapeStyle(.background) : AnyShapeStyle(Color.primary.opacity(0.6)))
                             .padding(.horizontal, 9)
                             .frame(height: 20)
-                            .background(Capsule().fill(module.filter == filter ? .white : .white.opacity(0.08)))
+                            .background(Capsule().fill(module.filter == filter ? Color.primary : Color.primary.opacity(0.08)))
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -405,12 +425,12 @@ private struct ClipboardView: View {
                     Button { module.clear() } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(Color.primary.opacity(0.5))
                             .frame(width: 24, height: 20)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Vider l'historique (les éléments épinglés sont gardés)")
+                    .help(tr("Vider l'historique (les éléments épinglés sont gardés)", "Clear history (pinned items are kept)"))
                 }
             }
 
@@ -419,10 +439,12 @@ private struct ClipboardView: View {
                 VStack(spacing: 4) {
                     Image(systemName: "doc.on.clipboard")
                         .font(.system(size: 18))
-                    Text(module.items.isEmpty ? "Copie quelque chose, il apparaîtra ici" : "Rien dans cette catégorie")
+                    Text(module.items.isEmpty
+                         ? tr("Copie quelque chose, il apparaîtra ici", "Copy something and it will show up here")
+                         : tr("Rien dans cette catégorie", "Nothing in this category"))
                         .font(.system(size: 11, weight: .medium))
                 }
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Color.primary.opacity(0.4))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.horizontal) {
@@ -454,9 +476,9 @@ private struct ClipboardCard: View {
                         .resizable()
                         .frame(width: 14, height: 14)
                 }
-                Text(item.date, format: .relative(presentation: .named, unitsStyle: .abbreviated))
+                Text(item.date, format: .relative(presentation: .named, unitsStyle: .abbreviated).locale(IslandSettings.shared.locale))
                     .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(Color.primary.opacity(0.45))
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if item.isPinned {
@@ -474,13 +496,13 @@ private struct ClipboardCard: View {
         .frame(maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.white.opacity(isHovered ? 0.13 : 0.07))
+                .fill(Color.primary.opacity(isHovered ? 0.13 : 0.07))
         )
         .overlay {
             if isCopied {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.black.opacity(0.7))
-                    .overlay(Label("Copié", systemImage: "checkmark").font(.system(size: 12, weight: .semibold)))
+                    .fill(.background.opacity(0.85))
+                    .overlay(Label(tr("Copié", "Copied"), systemImage: "checkmark").font(.system(size: 12, weight: .semibold)))
                     .transition(.opacity)
             }
         }
@@ -506,12 +528,12 @@ private struct ClipboardCard: View {
         case .text:
             Text(item.text ?? "")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(Color.primary.opacity(0.9))
                 .lineLimit(4)
         case .image:
             if let image = module.image(for: item) {
                 // L'image remplit la carte sans en déborder (scaledToFill seul agrandit le cadre).
-                Color.black.opacity(0.35)
+                Color.primary.opacity(0.08)
                     .overlay {
                         if module.fullImages {
                             Image(nsImage: image).resizable().scaledToFit()
@@ -529,9 +551,9 @@ private struct ClipboardCard: View {
                         .resizable()
                         .frame(width: 30, height: 30)
                 }
-                Text(urls.count > 1 ? "\(urls.count) fichiers" : urls.first?.lastPathComponent ?? "")
+                Text(urls.count > 1 ? tr("\(urls.count) fichiers", "\(urls.count) files") : urls.first?.lastPathComponent ?? "")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Color.primary.opacity(0.9))
                     .lineLimit(3)
             }
         }
@@ -560,39 +582,48 @@ private struct ClipboardSettingsView: View {
     @Bindable var module: ClipboardModule
 
     var body: some View {
-        PickerRow("Raccourci d'ouverture",
+        PickerRow(tr("Raccourci d'ouverture", "Open shortcut"),
                   subtitle: module.shortcutConflict
-                      ? "Ce raccourci est déjà utilisé par une autre app."
-                      : "Ouvre l'historique depuis n'importe où.",
+                      ? tr("Ce raccourci est déjà utilisé par une autre app.", "This shortcut is already used by another app.")
+                      : tr("Ouvre l'historique depuis n'importe où.", "Opens the history from anywhere."),
                   selection: $module.shortcut) {
             ForEach(ClipboardShortcut.allCases) { Text($0.label).tag($0) }
         }
-        SliderRow("Taille de l'historique", subtitle: "Les éléments épinglés ne comptent pas.",
+        SliderRow(tr("Taille de l'historique", "History size"),
+                  subtitle: tr("Les éléments épinglés ne comptent pas.", "Pinned items don't count."),
                   value: $module.maxItems, range: 10...200, step: 10) { "\(Int($0))" }
-        ToggleRow("Conserver après redémarrage", isOn: $module.persist)
-        ToggleRow("Ignorer les mots de passe",
-                  subtitle: "Ne garde pas ce que les gestionnaires de mots de passe signalent comme confidentiel.",
+        ToggleRow(tr("Conserver après redémarrage", "Keep after restart"), isOn: $module.persist)
+        ToggleRow(tr("Ignorer les mots de passe", "Ignore passwords"),
+                  subtitle: tr("Ne garde pas ce que les gestionnaires de mots de passe signalent comme confidentiel.",
+                               "Doesn't keep what password managers mark as confidential."),
                   isOn: $module.ignoreConcealed)
-        ToggleRow("Images entières", subtitle: "Sinon, les images sont rognées pour remplir la carte.", isOn: $module.fullImages)
-        ToggleRow("Fermer l'île après une copie", isOn: $module.closeAfterCopy)
-        ToggleRow("Coller automatiquement",
+        ToggleRow(tr("Images entières", "Full images"),
+                  subtitle: tr("Sinon, les images sont rognées pour remplir la carte.", "Otherwise, images are cropped to fill the card."),
+                  isOn: $module.fullImages)
+        ToggleRow(tr("Fermer l'île après une copie", "Close island after copying"), isOn: $module.closeAfterCopy)
+        ToggleRow(tr("Coller automatiquement", "Paste automatically"),
                   subtitle: module.autoPaste && !module.hasAccessibility
-                      ? "Autorise Island dans Confidentialité et sécurité › Accessibilité."
-                      : "Colle directement dans l'app active (permission Accessibilité).",
+                      ? tr("Autorise Island dans Confidentialité et sécurité › Accessibilité.",
+                           "Allow Island in Privacy & Security › Accessibility.")
+                      : tr("Colle directement dans l'app active (permission Accessibilité).",
+                           "Pastes straight into the active app (Accessibility permission)."),
                   isOn: $module.autoPaste)
-        SettingsRow("Historique", subtitle: "\(module.items.count) élément\(module.items.count > 1 ? "s" : "")") {
-            Button("Vider", role: .destructive) { module.clear() }
+        SettingsRow(tr("Historique", "History"),
+                    subtitle: tr("\(module.items.count) élément\(module.items.count > 1 ? "s" : "")",
+                                 "\(module.items.count) item\(module.items.count == 1 ? "" : "s")")) {
+            Button(tr("Vider", "Clear"), role: .destructive) { module.clear() }
                 .disabled(module.items.isEmpty)
         }
-        SettingsSubheader("Apps ignorées")
+        SettingsSubheader(tr("Apps ignorées", "Ignored apps"))
         ForEach(module.ignoredApps, id: \.self) { bundleID in
             SettingsRow(ClipboardModule.appName(bundleID), subtitle: bundleID) {
-                Button("Retirer") { module.stopIgnoring(bundleID) }
+                Button(tr("Retirer", "Remove")) { module.stopIgnoring(bundleID) }
             }
         }
-        SettingsRow("Ajouter une app",
-                    subtitle: "Ce que tu copies dans ces apps n'est jamais gardé (ex. : banque, gestionnaire de mots de passe).") {
-            Button("Choisir…") { module.chooseAppToIgnore() }
+        SettingsRow(tr("Ajouter une app", "Add an app"),
+                    subtitle: tr("Ce que tu copies dans ces apps n'est jamais gardé (ex. : banque, gestionnaire de mots de passe).",
+                                 "What you copy in these apps is never kept (e.g. banking, password manager).")) {
+            Button(tr("Choisir…", "Choose…")) { module.chooseAppToIgnore() }
         }
     }
 }

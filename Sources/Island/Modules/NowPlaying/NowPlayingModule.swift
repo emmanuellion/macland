@@ -10,7 +10,7 @@ enum SkipMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .track: "Morceau"
+        case .track: tr("Morceau", "Track")
         case .seconds: "15 s"
         }
     }
@@ -20,9 +20,12 @@ enum SkipMode: String, CaseIterable, Identifiable {
 @Observable
 final class NowPlayingModule: IslandModule {
     let id = "nowPlaying"
-    let name = "Lecture en cours"
+    var name: String { tr("Lecture en cours", "Now Playing") }
     let systemImage = "music.note"
-    let summary = "Pochette, titre et contrôles du morceau en cours (Spotify, Musique, navigateurs…)."
+    var summary: String {
+        tr("Pochette, titre et contrôles du morceau en cours (Spotify, Musique, navigateurs…).",
+           "Artwork, title and controls for the current track (Spotify, Music, browsers…).")
+    }
     let tint = Color.pink
     /// Prend la place restante sur l'accueil seulement quand quelque chose joue ;
     /// sinon les widgets sont centrés.
@@ -33,7 +36,7 @@ final class NowPlayingModule: IslandModule {
         "artworkTint": true,
         "showProgress": true,
         "showAppIcon": true,
-        "hideWhenIdle": false,
+        "hideWhenIdle": true,
         "skipMode": SkipMode.track.rawValue,
         "showOutputPicker": true,
     ])
@@ -51,7 +54,8 @@ final class NowPlayingModule: IslandModule {
 
     private(set) var info: NowPlayingInfo?
     private(set) var artwork: NSImage?
-    private(set) var artworkColor: Color?
+    /// Teinte (0…1) et saturation de la couleur dominante de la pochette.
+    private(set) var artworkHue: (hue: Double, saturation: Double)?
     private(set) var error: String?
     /// Position (0…1) pendant que l'utilisateur fait glisser la barre de progression.
     var scrubFraction: Double?
@@ -79,17 +83,34 @@ final class NowPlayingModule: IslandModule {
 
     var isVisibleInHome: Bool { !(hideWhenIdle && info == nil) }
 
-    /// Couleur d'accent : pochette si activé, sinon blanc.
-    var accent: Color { artworkTint ? (artworkColor ?? .white) : .white }
+    /// Couleur d'accent de l'île ouverte : pochette si activé, sinon couleur du texte.
+    var accent: Color { accent(onDarkBackground: IslandSettings.shared.islandColor.isDark) }
+
+    /// Claire sur fond noir, foncée sur fond pastel.
+    func accent(onDarkBackground dark: Bool) -> Color {
+        guard artworkTint, let artworkHue else { return dark ? .white : .black.opacity(0.8) }
+        return Color(hue: artworkHue.hue, saturation: min(1, artworkHue.saturation * 1.4),
+                     brightness: dark ? 0.9 : 0.45)
+    }
 
     func expandedView() -> AnyView { AnyView(NowPlayingView(module: self)) }
     func settingsView() -> AnyView? { AnyView(NowPlayingSettingsView(module: self)) }
 
     func start() {
-        error = MediaRemoteAdapter.isAvailable ? nil : "Adaptateur absent : lance l'app depuis Island.app (scripts/build-app.sh)."
+        error = MediaRemoteAdapter.isAvailable ? nil
+            : tr("Adaptateur absent : lance l'app depuis Island.app (scripts/build-app.sh).",
+                 "Adapter missing: launch the app from Island.app (scripts/build-app.sh).")
         #if DEBUG
         // Simule « rien en lecture » pour les captures.
         if CommandLine.arguments.contains("--no-media") { return }
+        // Morceau fictif pour les captures publiques (pas d'écoute personnelle à l'écran).
+        if CommandLine.arguments.contains("--demo-media") {
+            update(info: NowPlayingInfo(title: "Neon Harbor", artist: "The Islanders", album: "Afterglow",
+                                        bundleIdentifier: "com.apple.Music", isPlaying: true, duration: 214,
+                                        elapsed: 83, timestamp: .now, playbackRate: 1),
+                   artwork: Self.demoArtwork())
+            return
+        }
         #endif
         adapter.start()
     }
@@ -143,6 +164,18 @@ final class NowPlayingModule: IslandModule {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
+    #if DEBUG
+    private static func demoArtwork() -> NSImage {
+        NSImage(size: NSSize(width: 300, height: 300), flipped: false) { rect in
+            NSGradient(colors: [NSColor(red: 0.98, green: 0.45, blue: 0.35, alpha: 1),
+                                NSColor(red: 0.55, green: 0.25, blue: 0.85, alpha: 1)])?.draw(in: rect, angle: -45)
+            NSColor.white.withAlphaComponent(0.85).setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 95, dy: 95)).fill()
+            return true
+        }
+    }
+    #endif
+
     // MARK: Mises à jour
 
     private func update(info: NowPlayingInfo?, artwork: NSImage?) {
@@ -164,7 +197,7 @@ final class NowPlayingModule: IslandModule {
         self.info = info
         if artwork !== self.artwork {
             self.artwork = artwork
-            artworkColor = artwork?.vibrantAverageColor.map(Color.init(nsColor:))
+            artworkHue = artwork?.dominantHue
         }
         updateActivity()
     }
@@ -175,7 +208,8 @@ final class NowPlayingModule: IslandModule {
             return
         }
         let artwork = artwork
-        let accent = accent
+        // L'île fermée est toujours noire.
+        let accent = accent(onDarkBackground: true)
         ActivityCenter.shared.show(LiveActivity(id: "nowPlaying", priority: -1, duration: nil) {
             ArtworkView(image: artwork, size: 22, cornerRadius: 5)
         } trailing: {
@@ -204,17 +238,17 @@ private struct NowPlayingView: View {
                         }
                     }
                     .onTapGesture { module.openSourceApp() }
-                    .help("Ouvrir l'app")
+                    .help(tr("Ouvrir l'app", "Open app"))
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .top, spacing: 6) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(info.title)
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.primary)
                             Text(info.artist.isEmpty ? info.album : info.artist)
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.55))
+                                .foregroundStyle(Color.primary.opacity(0.55))
                         }
                         .lineLimit(1)
                         Spacer(minLength: 0)
@@ -243,10 +277,10 @@ private struct NowPlayingView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Image(systemName: "music.note")
                     .font(.system(size: 20))
-                    .foregroundStyle(.white.opacity(0.4))
-                Text(module.error ?? "Rien en lecture")
+                    .foregroundStyle(Color.primary.opacity(0.4))
+                Text(module.error ?? tr("Rien en lecture", "Nothing playing"))
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Color.primary.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -273,14 +307,14 @@ private struct ProgressBar: View {
                     let width = proxy.size.width
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(.white.opacity(0.15))
+                            .fill(Color.primary.opacity(0.15))
                             .frame(height: barHeight)
                         Capsule()
                             .fill(module.accent)
                             .frame(width: max(barHeight, width * fraction), height: barHeight)
                         if isActive {
                             Circle()
-                                .fill(.white)
+                                .fill(Color.primary)
                                 .frame(width: 13, height: 13)
                                 .shadow(color: .black.opacity(0.4), radius: 2)
                                 .offset(x: width * fraction - 6.5)
@@ -311,10 +345,10 @@ private struct ProgressBar: View {
 
                 HStack {
                     Text(Self.format(elapsed))
-                        .foregroundStyle(isScrubbing ? .white : .white.opacity(0.5))
+                        .foregroundStyle(isScrubbing ? Color.primary : Color.primary.opacity(0.5))
                     Spacer()
                     Text("-" + Self.format(max(0, duration - elapsed)))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Color.primary.opacity(0.5))
                 }
             }
             .onDisappear { module.isHoveringProgress = false }
@@ -349,12 +383,12 @@ private struct OutputPicker: View {
         } label: {
             Image(systemName: "airplayaudio")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(Color.primary.opacity(0.7))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Sortie audio")
+        .help(tr("Sortie audio", "Audio output"))
     }
 }
 
@@ -367,7 +401,7 @@ private struct ControlButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.primary)
                 .frame(width: 28, height: 24)
                 .contentShape(Rectangle())
         }
@@ -386,10 +420,10 @@ struct ArtworkView: View {
                 Image(nsImage: image).resizable().scaledToFill()
             } else {
                 ZStack {
-                    Color.white.opacity(0.1)
+                    Color.primary.opacity(0.1)
                     Image(systemName: "music.note")
                         .font(.system(size: size * 0.4))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Color.primary.opacity(0.5))
                 }
             }
         }
@@ -423,8 +457,8 @@ struct EqualizerBars: View {
 }
 
 private extension NSImage {
-    /// Couleur moyenne de l'image, éclaircie et saturée pour rester lisible sur fond noir.
-    var vibrantAverageColor: NSColor? {
+    /// Teinte et saturation de la couleur moyenne de l'image.
+    var dominantHue: (hue: Double, saturation: Double)? {
         guard let tiff = tiffRepresentation, let input = CIImage(data: tiff),
               let filter = CIFilter(name: "CIAreaAverage", parameters: [
                   kCIInputImageKey: input,
@@ -442,7 +476,7 @@ private extension NSImage {
                               blue: CGFloat(pixel[2]) / 255, alpha: 1)
         var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
         average.usingColorSpace(.deviceRGB)?.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-        return NSColor(hue: hue, saturation: min(1, saturation * 1.4), brightness: max(0.75, brightness), alpha: 1)
+        return (Double(hue), Double(saturation))
     }
 }
 
@@ -453,30 +487,30 @@ private struct NowPlayingSettingsView: View {
 
     var body: some View {
         if let error = module.error {
-            SettingsRow("État", subtitle: error) {
+            SettingsRow(tr("État", "Status"), subtitle: error) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
         }
-        ToggleRow("Activité pendant la lecture", subtitle: "Pochette et égaliseur autour de l'encoche fermée.",
+        ToggleRow(tr("Activité pendant la lecture", "Activity while playing"),
+                  subtitle: tr("Pochette et égaliseur autour de l'encoche fermée.", "Artwork and equalizer around the closed notch."),
                   isOn: $module.liveActivity)
-        ToggleRow("Couleur de la pochette", subtitle: "Teinte l'égaliseur et la barre de progression.",
+        ToggleRow(tr("Couleur de la pochette", "Artwork color"),
+                  subtitle: tr("Teinte l'égaliseur et la barre de progression.", "Tints the equalizer and progress bar."),
                   isOn: $module.artworkTint)
-        ToggleRow("Barre de progression", subtitle: "Fais-la glisser pour te déplacer dans le morceau.", isOn: $module.showProgress)
-        ToggleRow("Icône de l'app source", isOn: $module.showAppIcon)
-        ToggleRow("Choix de la sortie audio", subtitle: "Bouton pour passer des haut-parleurs aux AirPods, etc.",
+        ToggleRow(tr("Barre de progression", "Progress bar"),
+                  subtitle: tr("Fais-la glisser pour te déplacer dans le morceau.", "Drag it to scrub through the track."),
+                  isOn: $module.showProgress)
+        ToggleRow(tr("Icône de l'app source", "Source app icon"), isOn: $module.showAppIcon)
+        ToggleRow(tr("Choix de la sortie audio", "Audio output picker"),
+                  subtitle: tr("Bouton pour passer des haut-parleurs aux AirPods, etc.", "Button to switch from speakers to AirPods, etc."),
                   isOn: $module.showOutputPicker)
-        PickerRow("Boutons précédent / suivant", subtitle: "15 s est pratique pour les podcasts et vidéos.",
+        PickerRow(tr("Boutons précédent / suivant", "Previous / next buttons"),
+                  subtitle: tr("15 s est pratique pour les podcasts et vidéos.", "15 s is handy for podcasts and videos."),
                   selection: $module.skipMode) {
             ForEach(SkipMode.allCases) { Text($0.label).tag($0) }
         }
-        ToggleRow("Masquer quand rien ne joue", subtitle: "Libère la place pour les autres widgets.",
+        ToggleRow(tr("Masquer quand rien ne joue", "Hide when nothing is playing"),
+                  subtitle: tr("Libère la place pour les autres widgets.", "Frees up room for the other widgets."),
                   isOn: $module.hideWhenIdle)
     }
-}
-
-func debugLog(_ message: @autoclosure () -> String) {
-    #if DEBUG
-    print("[\(String(format: "%.3f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000)))] \(message())")
-    fflush(stdout)
-    #endif
 }

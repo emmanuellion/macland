@@ -1,5 +1,56 @@
 import Foundation
 import Observation
+import SwiftUI
+
+/// Matière de l'île ouverte.
+enum IslandMaterial: String, CaseIterable, Identifiable {
+    case solid
+    /// Liquid Glass (macOS 26+), teinté par la couleur choisie.
+    case glass
+
+    var id: String { rawValue }
+    static var isGlassAvailable: Bool {
+        if #available(macOS 26, *) { return true }
+        return false
+    }
+}
+
+/// Variante du verre : standard (plus diffus) ou clair (plus transparent).
+enum GlassVariant: String, CaseIterable, Identifiable {
+    case regular, clear
+    var id: String { rawValue }
+}
+
+/// Couleur de l'île ouverte. Fermée, l'île reste noire pour se fondre dans l'encoche (la caméra est noire).
+enum IslandColor: String, CaseIterable, Identifiable {
+    case black, blue, pink, lavender, mint
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .black: .black
+        case .blue: Color(red: 0.72, green: 0.84, blue: 0.98)
+        case .pink: Color(red: 0.98, green: 0.78, blue: 0.85)
+        case .lavender: Color(red: 0.82, green: 0.78, blue: 0.98)
+        case .mint: Color(red: 0.74, green: 0.93, blue: 0.84)
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .black: tr("Noir", "Black")
+        case .blue: tr("Bleu pastel", "Pastel blue")
+        case .pink: tr("Rose pastel", "Pastel pink")
+        case .lavender: tr("Lavande", "Lavender")
+        case .mint: tr("Menthe", "Mint")
+        }
+    }
+
+    /// Les teintes pastel prennent un texte sombre.
+    var isDark: Bool { self == .black }
+    var colorScheme: ColorScheme { isDark ? .dark : .light }
+}
 
 enum ExpandTrigger: String, CaseIterable, Identifiable {
     case hover
@@ -9,8 +60,8 @@ enum ExpandTrigger: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .hover: "Survol"
-        case .click: "Clic"
+        case .hover: tr("Survol", "Hover")
+        case .click: tr("Clic", "Click")
         }
     }
 }
@@ -51,6 +102,10 @@ final class IslandSettings {
         didSet { defaults.set(showMenuBarIcon, forKey: "showMenuBarIcon") }
     }
 
+    var language: AppLanguage {
+        didSet { defaults.set(language.rawValue, forKey: "language") }
+    }
+
     // MARK: Activités en direct
 
     /// Affichage d'informations brèves autour de l'encoche fermée (charge, rappels…).
@@ -86,6 +141,31 @@ final class IslandSettings {
         didSet { defaults.set(showShadow, forKey: "showShadow") }
     }
 
+    var islandColor: IslandColor {
+        didSet { defaults.set(islandColor.rawValue, forKey: "islandColor") }
+    }
+
+    var islandMaterial: IslandMaterial {
+        didSet { defaults.set(islandMaterial.rawValue, forKey: "islandMaterial") }
+    }
+
+    var glassVariant: GlassVariant {
+        didSet { defaults.set(glassVariant.rawValue, forKey: "glassVariant") }
+    }
+
+    /// Intensité de la teinte posée sur le verre (0 = verre pur, 1 = couleur presque opaque).
+    var glassTint: Double {
+        didSet { defaults.set(glassTint, forKey: "glassTint") }
+    }
+
+    /// Le verre n'est utilisé que si le système le permet.
+    var usesGlass: Bool { islandMaterial == .glass && IslandMaterial.isGlassAvailable }
+
+    /// Filets verticaux entre les widgets de l'accueil.
+    var showWidgetSeparators: Bool {
+        didSet { defaults.set(showWidgetSeparators, forKey: "showWidgetSeparators") }
+    }
+
     // MARK: Modules
 
     /// Ordre d'affichage des modules (identifiants).
@@ -99,12 +179,17 @@ final class IslandSettings {
     }
 
     private static let appearanceDefaults: [String: Any] = [
+        "islandMaterial": IslandMaterial.solid.rawValue,
+        "glassVariant": GlassVariant.regular.rawValue,
+        "glassTint": 0.45,
         "expandedWidth": 680.0,
         "expandedHeight": 190.0,
         "expandedCornerRadius": 30.0,
         "animationResponse": 0.42,
         "animationBounce": 0.22,
         "showShadow": true,
+        "showWidgetSeparators": false,
+        "islandColor": IslandColor.black.rawValue,
     ]
 
     private init() {
@@ -115,6 +200,7 @@ final class IslandSettings {
             "hapticFeedback": true,
             "showOnScreensWithoutNotch": false,
             "showMenuBarIcon": true,
+            "language": AppLanguage.system.rawValue,
             "liveActivitiesEnabled": true,
             "moduleOrder": [String](),
             "moduleEnabled": [String: Bool](),
@@ -126,6 +212,7 @@ final class IslandSettings {
         hapticFeedback = defaults.bool(forKey: "hapticFeedback")
         showOnScreensWithoutNotch = defaults.bool(forKey: "showOnScreensWithoutNotch")
         showMenuBarIcon = defaults.bool(forKey: "showMenuBarIcon")
+        language = AppLanguage(rawValue: defaults.string(forKey: "language") ?? "") ?? .system
         liveActivitiesEnabled = defaults.bool(forKey: "liveActivitiesEnabled")
         expandedWidth = defaults.double(forKey: "expandedWidth")
         expandedHeight = defaults.double(forKey: "expandedHeight")
@@ -133,6 +220,11 @@ final class IslandSettings {
         animationResponse = defaults.double(forKey: "animationResponse")
         animationBounce = defaults.double(forKey: "animationBounce")
         showShadow = defaults.bool(forKey: "showShadow")
+        showWidgetSeparators = defaults.bool(forKey: "showWidgetSeparators")
+        islandColor = IslandColor(rawValue: defaults.string(forKey: "islandColor") ?? "") ?? .black
+        islandMaterial = IslandMaterial(rawValue: defaults.string(forKey: "islandMaterial") ?? "") ?? .solid
+        glassVariant = GlassVariant(rawValue: defaults.string(forKey: "glassVariant") ?? "") ?? .regular
+        glassTint = defaults.double(forKey: "glassTint")
         moduleOrder = defaults.stringArray(forKey: "moduleOrder") ?? []
         moduleEnabled = defaults.dictionary(forKey: "moduleEnabled") as? [String: Bool] ?? [:]
     }
@@ -145,5 +237,10 @@ final class IslandSettings {
         animationResponse = defaults.double(forKey: "animationResponse")
         animationBounce = defaults.double(forKey: "animationBounce")
         showShadow = defaults.bool(forKey: "showShadow")
+        showWidgetSeparators = defaults.bool(forKey: "showWidgetSeparators")
+        islandColor = IslandColor(rawValue: defaults.string(forKey: "islandColor") ?? "") ?? .black
+        islandMaterial = IslandMaterial(rawValue: defaults.string(forKey: "islandMaterial") ?? "") ?? .solid
+        glassVariant = GlassVariant(rawValue: defaults.string(forKey: "glassVariant") ?? "") ?? .regular
+        glassTint = defaults.double(forKey: "glassTint")
     }
 }
