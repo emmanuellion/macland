@@ -97,4 +97,44 @@ enum DebugMedia {
         CGImageDestinationFinalize(destination)
     }
 }
+
+import AVFoundation
+
+extension DebugMedia {
+    /// Petite vidéo de test (3 s, dégradé animé) pour essayer les fonds d'écran.
+    static func writeTestVideo(to url: URL, hue: CGFloat) async {
+        try? FileManager.default.removeItem(at: url)
+        guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else { return }
+        let size = CGSize(width: 640, height: 360)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: size.width, AVVideoHeightKey: size.height,
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+            kCVPixelBufferWidthKey as String: size.width, kCVPixelBufferHeightKey as String: size.height,
+        ])
+        writer.add(input)
+        writer.startWriting()
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<90 {
+            while !input.isReadyForMoreMediaData { try? await Task.sleep(for: .milliseconds(5)) }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            guard let buffer else { continue }
+            CVPixelBufferLockBaseAddress(buffer, [])
+            let context = CGContext(data: CVPixelBufferGetBaseAddress(buffer), width: Int(size.width), height: Int(size.height),
+                                    bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue)!
+            let shift = CGFloat(frame) / 90
+            context.setFillColor(NSColor(hue: hue, saturation: 0.6, brightness: 0.5 + 0.4 * shift, alpha: 1).cgColor)
+            context.fill(CGRect(origin: .zero, size: size))
+            context.setFillColor(NSColor.white.withAlphaComponent(0.8).cgColor)
+            context.fillEllipse(in: CGRect(x: shift * (size.width - 80), y: size.height / 2 - 40, width: 80, height: 80))
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+    }
+}
 #endif

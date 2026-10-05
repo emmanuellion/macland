@@ -140,6 +140,40 @@ enum AudioDevices {
         string(of: device, kAudioObjectPropertyName) ?? "?"
     }
 
+    /// Nom de la sortie par défaut (ex. : « AirPods Pro de … »).
+    static var defaultOutputName: String? { defaultOutput.map(name(of:)) }
+
+    /// Vrai si la sortie par défaut est un appareil Bluetooth (AirPods, casque…).
+    static var isDefaultOutputBluetooth: Bool {
+        guard let device = defaultOutput else { return false }
+        var transport: UInt32 = 0
+        guard get(device, kAudioDevicePropertyTransportType, &transport) else { return false }
+        return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+    }
+
+    /// Appelle `handler` quand la sortie audio par défaut change (branchement d'AirPods, etc.).
+    static func observeDefaultOutputDevice(_ handler: @escaping @MainActor () -> Void) -> AnyObject {
+        DefaultDeviceObserver(handler: handler)
+    }
+
+    private final class DefaultDeviceObserver {
+        private lazy var block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.handler() }
+        }
+        private let handler: @MainActor () -> Void
+
+        init(handler: @escaping @MainActor () -> Void) {
+            self.handler = handler
+            var address = AudioDevices.address(kAudioHardwarePropertyDefaultOutputDevice)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, block)
+        }
+
+        deinit {
+            var address = AudioDevices.address(kAudioHardwarePropertyDefaultOutputDevice)
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, block)
+        }
+    }
+
     // MARK: Observation
 
     /// Appelle `handler` quand le volume, la sourdine ou la sortie par défaut changent.

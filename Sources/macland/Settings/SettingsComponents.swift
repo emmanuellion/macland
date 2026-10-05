@@ -55,6 +55,7 @@ struct SettingsCard<Content: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .searchSection(title)
     }
 }
 
@@ -99,6 +100,14 @@ struct SettingsRow<Control: View>: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .frame(minHeight: 54)
+        .background(
+            // Mise en évidence quand on arrive ici depuis la recherche.
+            Color.accentColor.opacity(SettingsNavigation.shared.highlighted == title ? 0.14 : 0)
+                .animation(.easeOut(duration: 0.6), value: SettingsNavigation.shared.highlighted)
+        )
+        .id(title)
+        .containerValue(\.settingsRowTitle, title)
+        .searchable(title, detail: subtitle)
     }
 }
 
@@ -207,6 +216,8 @@ struct StepperRow: View {
 }
 
 /// Intertitre à l'intérieur d'une carte.
+/// Intertitre. Dans `SettingsSections`, il ouvre une nouvelle carte portant ce titre ;
+/// ailleurs, il s'affiche comme un petit titre à l'intérieur de la carte.
 struct SettingsSubheader: View {
     let title: String
 
@@ -220,6 +231,7 @@ struct SettingsSubheader: View {
             .padding(.horizontal, 18)
             .padding(.top, 18)
             .padding(.bottom, 8)
+            .containerValue(\.settingsSectionTitle, title)
     }
 }
 

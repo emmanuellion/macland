@@ -1,15 +1,32 @@
 import AppKit
 import SwiftUI
 
+/// État global de l'app, consulté par les modules à l'arrêt.
+@MainActor
+enum AppLifecycle {
+    /// Vrai pendant la fermeture de l'app (≠ désactivation d'un module).
+    static var isTerminating = false
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = IslandSettings.shared
     private var notchControllers: [NotchWindowController] = []
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
+    private var onboardingState: OnboardingState?
+    private var onboardingCloseObserver: NSObjectProtocol?
+    private var settingsCloseObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        ModuleRegistry.shared.startEnabledModules()
+        #if DEBUG
+        // Mesures : app sans modules.
+        let startsModules = !CommandLine.arguments.contains("--no-modules")
+        #else
+        let startsModules = true
+        #endif
+        if startsModules { ModuleRegistry.shared.startEnabledModules() }
         terminateCleanlyOnSignals()
 
         NotificationCenter.default.addObserver(
@@ -23,7 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 // L'écran sous la souris, sinon celui avec l'encoche.
-                let target = self.notchControllers.first(where: \.containsMouse) ?? self.notchControllers.first
+                let target = self.notchControllers.first(where: \.containsMouse)
+                    ?? self.notchControllers.first(where: { $0.screen.hasNotch })
+                    ?? self.notchControllers.first
                 target?.open(page: page)
             }
         }
@@ -38,9 +57,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         observe { [weak self] in
             guard let self else { return }
+            // Réévalue le masquage en plein écran quand l'option change.
+            _ = settings.hideInFullScreen
+            notchControllers.forEach { $0.updateFullScreenVisibility() }
+        }
+        observe { [weak self] in
+            guard let self else { return }
+            // Lire le thème avant l'affectation : avec `settingsWindow?.… = …`, Swift n'évalue pas
+            // la partie droite si la fenêtre n'existe pas encore, et le thème ne serait jamais observé.
+            let appearance = settings.settingsTheme.appearance
+            settingsWindow?.appearance = appearance
+            onboardingWindow?.appearance = appearance
+        }
+        observe { [weak self] in
+            guard let self else { return }
             // La langue est lue ici pour reconstruire le menu quand elle change.
             _ = settings.isFrench
             updateStatusItem(visible: settings.showMenuBarIcon)
+            settingsWindow?.title = tr("Réglages de macland", "macland Settings")
+            onboardingWindow?.title = tr("Bienvenue dans macland", "Welcome to macland")
+            installMainMenu()
+        }
+
+        NotificationCenter.default.addObserver(forName: IslandCommands.showOnboardingNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.openOnboarding() }
+        }
+
+        var showsOnboarding = !settings.hasCompletedOnboarding
+        #if DEBUG
+        // Pas d'écran d'accueil pendant les tests et captures, sauf demande explicite.
+        if CommandLine.arguments.count > 1 { showsOnboarding = CommandLine.arguments.contains("--onboarding") }
+        #endif
+        if showsOnboarding {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openOnboarding() }
         }
 
         #if DEBUG
@@ -53,6 +102,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runPauseTest()
         } else if arguments.contains("--record") {
             runRecording()
+        } else if let index = arguments.firstIndex(of: "--test-search"), arguments.indices.contains(index + 1) {
+            runSearchTest(arguments[index + 1])
+        } else if let index = arguments.firstIndex(of: "--test-select"), arguments.indices.contains(index + 1) {
+            do {
+                try SystemWallpaperChoice.select(assetID: arguments[index + 1])
+                debugLog("choix écrit ; macland sélectionné : \(SystemWallpaperChoice.selectedMaclandAsset ?? "aucun")")
+            } catch {
+                debugLog("ERREUR \(error)")
+            }
+            NSApp.terminate(nil)
+        } else if arguments.contains("--remove-aerials") {
+            try? AerialCatalog.uninstall()
+            debugLog("retiré ; reste \(AerialCatalog.installedVideoIDs.count) vidéo(s) macland")
+            NSApp.terminate(nil)
+        } else if arguments.contains("--test-aerials") {
+            runAerialTest()
+        } else if arguments.contains("--test-wallpaper") {
+            runWallpaperTest()
+        } else if arguments.contains("--test-theme") {
+            runThemeTest()
+        } else if arguments.contains("--test-weather") {
+            runWeatherTest()
+        } else if arguments.contains("--onboarding"), DebugSnapshots.directory != nil {
+            runOnboardingSnapshots()
         } else if arguments.contains("--test-files") {
             runFileActionsTest()
         } else if arguments.contains("--test-system") {
@@ -126,6 +199,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             controller.debugCapture(name: "hud-compact")
             hud.style = .extended
+            (ModuleRegistry.shared.module(id: "airpods") as? AirPodsModule)?.announceSample()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            controller.debugCapture(name: "airpods")
             NSApp.terminate(nil)
         }
     }
@@ -171,12 +248,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let previousColor = settings.islandColor
         let previousLanguage = settings.language
+        let previousWidth = settings.expandedWidth
         if let color = value("--island-color").flatMap(IslandColor.init(rawValue:)) { settings.islandColor = color }
         if let language = value("--language").flatMap(AppLanguage.init(rawValue:)) { settings.language = language }
+        if let width = value("--island-width").flatMap(Double.init) { settings.expandedWidth = width }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
                 IslandSettings.shared.islandColor = previousColor
                 IslandSettings.shared.language = previousLanguage
+                IslandSettings.shared.expandedWidth = previousWidth
             }
         }
     }
@@ -221,8 +301,137 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Tape une recherche dans les réglages, capture les résultats, puis ouvre le premier.
+    private func runSearchTest(_ query: String) {
+        openSettings()
+        let navigation = SettingsNavigation.shared
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { navigation.query = query }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            debugLog("index : \(navigation.index.count) réglages ; résultats « \(query) » : \(navigation.results.map { "\($0.page.title) (\($0.entries.count))" })")
+            DebugSnapshots.capture(self?.settingsWindow, name: "search-results")
+            if let first = navigation.results.first?.entries.first {
+                debugLog("ouverture de « \(first.title) » (\(first.section ?? "-"))")
+                navigation.reveal(first)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.6) { [weak self] in
+            DebugSnapshots.capture(self?.settingsWindow, name: "search-reveal")
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Installe deux vidéos de test dans le catalogue de macOS, vérifie, puis retire tout.
+    private func runAerialTest() {
+        Task {
+            guard let directory = DebugSnapshots.directory else { return }
+            let urls = [directory.appending(path: "aerial-a.mp4"), directory.appending(path: "aerial-b.mp4")]
+            await DebugMedia.writeTestVideo(to: urls[0], hue: 0.55)
+            await DebugMedia.writeTestVideo(to: urls[1], hue: 0.08)
+            let videos = urls.enumerated().map { WallpaperVideo(id: UUID(), name: "Test macland \($0.offset + 1)", url: $0.element, bookmark: nil) }
+            do {
+                try await AerialCatalog.install(videos)
+                debugLog("installé : \(AerialCatalog.installedVideoIDs.count) vidéo(s)")
+            } catch {
+                debugLog("ERREUR installation : \(error)")
+            }
+            try? await Task.sleep(for: .seconds(3))
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Génère deux vidéos, les joue en fond de bureau, applique puis restaure le fond système.
+    private func runWallpaperTest() {
+        Task {
+            guard let directory = DebugSnapshots.directory else { return }
+            let first = directory.appending(path: "test-bleu.mp4")
+            let second = directory.appending(path: "test-rose.mp4")
+            await DebugMedia.writeTestVideo(to: first, hue: 0.6)
+            await DebugMedia.writeTestVideo(to: second, hue: 0.92)
+            debugLog("vidéos : \((try? first.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) o, \((try? second.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) o")
+
+            let engine = DesktopVideoEngine()
+            engine.show(first)
+            try? await Task.sleep(for: .seconds(1.5))
+            debugLog("bureau (1re vidéo) :\n\(engine.debugStatus)")
+            try? await Task.sleep(for: .seconds(1))
+            debugLog("1 s plus tard :\n\(engine.debugStatus)")
+            engine.show(second)
+            try? await Task.sleep(for: .seconds(2))
+            debugLog("bureau (2e vidéo, après fondu) :\n\(engine.debugStatus)")
+            engine.tearDown()
+
+            let screen = NSScreen.main!
+            let before = NSWorkspace.shared.desktopImageURL(for: screen)
+            await SystemWallpaper.apply(videoURL: first, id: UUID())
+            let during = NSWorkspace.shared.desktopImageURL(for: screen)
+            try? await Task.sleep(for: .seconds(1))
+            SystemWallpaper.restoreOriginals()
+            let after = NSWorkspace.shared.desktopImageURL(for: screen)
+            debugLog("fond système avant : \(before?.lastPathComponent ?? "?")")
+            debugLog("fond système pendant : \(during?.lastPathComponent ?? "?")")
+            debugLog("fond système après : \(after?.lastPathComponent ?? "?") — restauré : \(before == after)")
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Change le thème pendant que les réglages sont ouverts, comme le ferait l'utilisateur.
+    private func runThemeTest() {
+        let previous = settings.settingsTheme
+        openSettings()
+        let steps: [(Double, SettingsTheme?)] = [(1, nil), (1.5, .dark), (2.5, nil), (3, .light), (4, nil)]
+        for (time, theme) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + time) { [weak self] in
+                guard let self else { return }
+                if let theme {
+                    settings.settingsTheme = theme
+                    debugLog("thème → \(theme)")
+                } else {
+                    debugLog("fenêtre : appearance=\(settingsWindow?.appearance?.name.rawValue ?? "nil") effective=\(settingsWindow?.effectiveAppearance.name.rawValue ?? "?")")
+                    DebugSnapshots.capture(settingsWindow, name: "theme-\(Int(time * 10))")
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
+            self?.settings.settingsTheme = previous
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Recherche « Paris » et récupère la prévision avec le code de l'app.
+    private func runWeatherTest() {
+        Task {
+            do {
+                let places = try await WeatherService.search("Paris", french: true)
+                debugLog("recherche : \(places.prefix(3).map { "\($0.name) (\($0.latitude), \($0.longitude))" })")
+                if let paris = places.first {
+                    let report = try await WeatherService.forecast(for: paris, fahrenheit: false)
+                    debugLog("prévision : \(report)")
+                    debugLog("symbole : \(WeatherService.symbol(for: report.code, isDay: report.isDay)) — \(WeatherService.condition(for: report.code))")
+                }
+            } catch {
+                debugLog("ERREUR \(error)")
+            }
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Capture les pages de l'écran d'accueil.
+    private func runOnboardingSnapshots() {
+        for page in 0..<OnboardingState.pageCount {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2 + Double(page)) { [weak self] in
+                self?.onboardingState?.page = page
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.9 + Double(page)) { [weak self] in
+                DebugSnapshots.capture(self?.onboardingWindow, name: "onboarding-\(page)")
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 + Double(OnboardingState.pageCount)) {
+            NSApp.terminate(nil)
+        }
+    }
+
     private func runSnapshots() {
-        let pages: [(String, SettingsPage)] = [("general", .general), ("appearance", .appearance), ("activities", .activities)]
+        let pages: [(String, SettingsPage)] = [("general", .general), ("appearance", .appearance), ("layout", .layout), ("activities", .activities)]
             + ModuleRegistry.shared.allModules.map { ("module-\($0.id)", .module($0.id)) }
         openSettings()
         for (index, (name, page)) in pages.enumerated() {
@@ -257,6 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
 
     func applicationWillTerminate(_ notification: Notification) {
+        AppLifecycle.isTerminating = true
         // Arrête notamment le processus de lecture en cours, qui sinon survivrait à l'app.
         ModuleRegistry.shared.enabledModules.forEach { $0.stop() }
     }
@@ -270,6 +480,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Îles
 
     private func rebuildNotches() {
+        #if DEBUG
+        // Mesures : app sans île.
+        if CommandLine.arguments.contains("--no-island") { return }
+        #endif
         notchControllers.forEach { $0.close() }
         let screens = NSScreen.screens.filter { $0.hasNotch || settings.showOnScreensWithoutNotch }
         notchControllers = screens.map { NotchWindowController(screen: $0, onOpenSettings: { [weak self] in self?.openSettings() }) }
@@ -297,6 +511,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettingsAction() { openSettings() }
 
+    // MARK: Menu principal
+
+    /// Menu invisible (app sans icône dans le Dock) mais indispensable aux raccourcis standard :
+    /// sans menu Édition, ⌘C / ⌘V / ⌘A ne fonctionnent pas dans les champs des réglages.
+    private func installMainMenu() {
+        let main = NSMenu()
+
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: tr("Réglages…", "Settings…"), action: #selector(openSettingsAction), keyEquivalent: ",").target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: tr("Quitter macland", "Quit macland"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: tr("Édition", "Edit"))
+        editMenu.addItem(withTitle: tr("Annuler", "Undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: tr("Rétablir", "Redo"), action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: tr("Couper", "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: tr("Copier", "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: tr("Coller", "Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: tr("Tout sélectionner", "Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+        main.addItem(editItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: tr("Fenêtre", "Window"))
+        windowMenu.addItem(withTitle: tr("Fermer", "Close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+
+        NSApp.mainMenu = main
+    }
+
+    // MARK: Écran d'accueil
+
+    func openOnboarding() {
+        if onboardingWindow == nil {
+            let state = OnboardingState()
+            onboardingState = state
+            let view = OnboardingView(state: state) { [weak self] in self?.finishOnboarding() }
+            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+            window.title = tr("Bienvenue dans macland", "Welcome to macland")
+            window.styleMask = [.titled, .closable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.isMovableByWindowBackground = true
+            window.isReleasedWhenClosed = false
+            window.appearance = settings.settingsTheme.appearance
+            window.center()
+            // Fermée avec le bouton rouge : on considère l'accueil comme vu.
+            onboardingCloseObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.settings.hasCompletedOnboarding = true
+                    self.onboardingWindow = nil
+                    self.onboardingState = nil
+                    if let observer = self.onboardingCloseObserver { NotificationCenter.default.removeObserver(observer) }
+                    self.onboardingCloseObserver = nil
+                }
+            }
+            onboardingWindow = window
+        }
+        NSApp.activate()
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func finishOnboarding() {
+        settings.hasCompletedOnboarding = true
+        onboardingWindow?.close()
+    }
+
     // MARK: Réglages
 
     func openSettings() {
@@ -310,6 +598,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.isReleasedWhenClosed = false
             window.setContentSize(NSSize(width: 980, height: 700))
             window.center()
+            window.appearance = settings.settingsTheme.appearance
+            // Fermée : on libère la fenêtre et ses vues (~20 Mo) ; elle est recréée à la prochaine ouverture.
+            settingsCloseObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.settingsWindow = nil
+                    if let observer = self.settingsCloseObserver { NotificationCenter.default.removeObserver(observer) }
+                    self.settingsCloseObserver = nil
+                }
+            }
             settingsWindow = window
         }
         NSApp.activate()

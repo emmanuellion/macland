@@ -122,6 +122,7 @@ private struct PrivacySettingsView: View {
     }
 
     var body: some View {
+        SettingsSubheader(tr("Surveillance", "Monitoring"))
         SettingsRow(tr("En ce moment", "Right now"), subtitle: status) {
             HStack(spacing: 6) {
                 Circle().fill(module.cameraActive ? PrivacyIndicatorModule.cameraColor : .secondary.opacity(0.3))
@@ -134,13 +135,14 @@ private struct PrivacySettingsView: View {
                   isOn: $module.watchesCamera)
         ToggleRow(tr("Micro", "Microphone"), subtitle: tr("Point orange à droite de l'encoche.", "Orange dot to the right of the notch."), leadingColor: PrivacyIndicatorModule.microphoneColor,
                   isOn: $module.watchesMicrophone)
-        ToggleRow(tr("Annonce au démarrage", "Announce on start"),
-                  subtitle: tr("Affiche brièvement quelle app commence à utiliser le micro.",
-                               "Briefly shows which app starts using the microphone."),
-                  isOn: $module.announce)
+        SettingsSubheader(tr("Affichage", "Display"))
         ToggleRow(tr("Points persistants", "Persistent dots"),
                   subtitle: tr("Restent affichés tant que la caméra ou le micro sont utilisés.",
                                "Stay visible while the camera or microphone is in use."),
                   isOn: $module.persistentDots)
+        ToggleRow(tr("Annonce au démarrage", "Announce on start"),
+                  subtitle: tr("Affiche brièvement quelle app commence à utiliser le micro.",
+                               "Briefly shows which app starts using the microphone."),
+                  isOn: $module.announce)
     }
 }

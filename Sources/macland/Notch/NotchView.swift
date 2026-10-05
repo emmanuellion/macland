@@ -33,7 +33,14 @@ struct NotchView: View {
         }
         .frame(width: size.width, height: size.height)
         .clipShape(shape)
-        .shadow(color: .black.opacity(settings.showShadow && (model.isExpanded || model.activity?.bottom != nil) ? 0.45 : 0),
+        .overlay {
+            // Contour optionnel de l'île ouverte.
+            if model.isExpanded, settings.islandBorder {
+                shape.stroke(Color.white.opacity(settings.islandColor.isDark ? 0.18 : 0.5), lineWidth: 1)
+            }
+        }
+        .shadow(color: .black.opacity(settings.showShadow && (model.isExpanded || model.activity?.bottom != nil)
+                                          ? settings.shadowOpacity : 0),
                 radius: 14, y: 6)
         .contentShape(shape)
         .onTapGesture {
@@ -136,7 +143,15 @@ private struct ExpandedView: View {
                     }
                 }
                 Spacer(minLength: model.geometry.size.width + 16)
-                PageButton(systemImage: "gearshape.fill", isSelected: false, action: onOpenSettings)
+                // Indicateurs des modules (ex. : batterie), à gauche du bouton de réglages.
+                ForEach(registry.enabledModules, id: \.id) { module in
+                    if let accessory = module.headerAccessory() {
+                        accessory.padding(.trailing, 6)
+                    }
+                }
+                if IslandSettings.shared.showSettingsButton {
+                    PageButton(systemImage: "gearshape.fill", isSelected: false, action: onOpenSettings)
+                }
             }
             .frame(height: model.geometry.size.height)
 
@@ -162,8 +177,6 @@ private struct HomeView: View {
     private let settings = IslandSettings.shared
 
     var body: some View {
-        // Sans widget flexible (rien en lecture), chaque widget est centré dans sa part de largeur.
-        let hasFlexible = widgets.contains { $0.layoutPriority > 0 }
 
         if widgets.isEmpty {
             Text(tr("Aucun widget activé", "No widgets enabled"))
@@ -181,8 +194,8 @@ private struct HomeView: View {
                             .padding(.horizontal, 14)
                             .layoutValue(key: HomeItemRole.self, value: .divider)
                     }
+                    // Pas de cadre extensible ici : la mise en page mesure la vraie largeur du contenu.
                     module.expandedView()
-                        .frame(maxWidth: .infinity, alignment: hasFlexible ? .leading : .center)
                         .layoutValue(key: HomeItemRole.self, value: module.layoutPriority > 0 ? .flexible : .widget)
                 }
             }
@@ -212,8 +225,9 @@ private struct HomeLayout: Layout {
         let widths = widths(for: bounds.width, subviews: subviews)
         let used = widths.reduce(0, +)
         var x = bounds.minX + max(0, (bounds.width - used) / 2)
+        // Chaque élément est centré dans sa part (utile quand la part dépasse le contenu).
         for (subview, width) in zip(subviews, widths) {
-            subview.place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading,
+            subview.place(at: CGPoint(x: x + width / 2, y: bounds.midY), anchor: .center,
                           proposal: ProposedViewSize(width: width, height: bounds.height))
             x += width
         }
@@ -236,6 +250,13 @@ private struct HomeLayout: Layout {
         if fixedNatural > roomForFixed, fixedNatural > 0 {
             let scale = max(0, roomForFixed) / fixedNatural
             fixed.forEach { widths[$0] = natural[$0] * scale }
+        }
+
+        // Un widget réduit passe à une variante plus compacte, souvent plus étroite que la part
+        // attribuée : on mesure ce qu'il occupe vraiment pour rendre la place perdue.
+        for index in fixed where widths[index] < natural[index] {
+            let used = subviews[index].sizeThatFits(ProposedViewSize(width: widths[index], height: nil)).width
+            widths[index] = min(widths[index], used)
         }
 
         if !flexible.isEmpty {
@@ -262,12 +283,15 @@ private struct PageButton: View {
     let action: () -> Void
 
     var body: some View {
+        let accent = IslandSettings.shared.islandAccent
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.45))
+                .foregroundStyle(isSelected ? (accent == .neutral ? Color.primary : .white) : Color.primary.opacity(0.45))
                 .frame(width: 30, height: 22)
-                .background(Capsule().fill(Color.primary.opacity(isSelected ? 0.16 : 0)))
+                .background(Capsule().fill(isSelected
+                    ? (accent == .neutral ? Color.primary.opacity(0.16) : accent.color.opacity(0.85))
+                    : .clear))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)

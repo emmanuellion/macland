@@ -120,18 +120,26 @@ final class MediaRemoteAdapter {
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        // Les rappels d'un ancien processus (module arrêté puis relancé) sont ignorés : sinon ils
+        // remettaient des infos après l'arrêt, ou effaçaient la référence au nouveau flux.
+        pipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.receive(data) }
+                MainActor.assumeIsolated {
+                    guard let self, self.isRunning, let process, self.process === process else { return }
+                    self.receive(data)
+                }
             }
         }
 
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self] exited in
             pipe.fileHandleForReading.readabilityHandler = nil
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.streamDidExit() }
+                MainActor.assumeIsolated {
+                    guard let self, self.process === exited else { return }
+                    self.streamDidExit()
+                }
             }
         }
 

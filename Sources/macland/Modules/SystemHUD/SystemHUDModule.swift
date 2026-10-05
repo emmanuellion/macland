@@ -34,7 +34,7 @@ enum HUDStyle: String, CaseIterable, Identifiable {
 }
 
 enum HUDKind {
-    case volume, brightness
+    case volume, brightness, keyboard
 }
 
 @MainActor
@@ -55,6 +55,8 @@ final class SystemHUDModule: IslandModule {
         "style": HUDStyle.extended.rawValue,
         "volume": true,
         "brightness": true,
+        "keyboard": true,
+        "inAppChanges": false,
         "duration": 1.6,
         "showPercentage": true,
         "fineSteps": false,
@@ -64,6 +66,9 @@ final class SystemHUDModule: IslandModule {
     var style: HUDStyle { didSet { store.set(style.rawValue, "style") } }
     var handlesVolume: Bool { didSet { store.set(handlesVolume, "volume"); restart() } }
     var handlesBrightness: Bool { didSet { store.set(handlesBrightness, "brightness"); restart() } }
+    var handlesKeyboard: Bool { didSet { store.set(handlesKeyboard, "keyboard"); restart() } }
+    /// Affiche aussi la jauge quand le réglage vient de la page Contrôles de l'île (redondant, désactivé par défaut).
+    var showsInAppChanges: Bool { didSet { store.set(showsInAppChanges, "inAppChanges") } }
     var duration: Double { didSet { store.set(duration, "duration") } }
     var showPercentage: Bool { didSet { store.set(showPercentage, "showPercentage") } }
     /// Pas de 1/32 au lieu de 1/16 (comme ⌥⇧ + touche dans macOS).
@@ -79,6 +84,15 @@ final class SystemHUDModule: IslandModule {
     @ObservationIgnored private var brightnessTimer: Timer?
     @ObservationIgnored private var permissionTimer: Timer?
     @ObservationIgnored private var lastBrightness: Float?
+    @ObservationIgnored private var lastKeyboard: Float?
+
+    /// Jusqu'à quand les changements viennent de l'île elle-même (page Contrôles).
+    private static var inAppChangeUntil = Date.distantPast
+
+    /// À appeler quand l'île modifie elle-même le volume ou une luminosité.
+    static func noteInAppChange() {
+        inAppChangeUntil = Date.now.addingTimeInterval(0.8)
+    }
     @ObservationIgnored private var lastVolume: (Float?, Bool)?
 
     init() {
@@ -86,6 +100,8 @@ final class SystemHUDModule: IslandModule {
         style = HUDStyle(rawValue: store.string("style")) ?? .extended
         handlesVolume = store.bool("volume")
         handlesBrightness = store.bool("brightness")
+        handlesKeyboard = store.bool("keyboard")
+        showsInAppChanges = store.bool("inAppChanges")
         duration = store.double("duration")
         showPercentage = store.bool("showPercentage")
         fineSteps = store.bool("fineSteps")
@@ -98,6 +114,7 @@ final class SystemHUDModule: IslandModule {
         isRunning = true
         lastVolume = (AudioDevices.volume, AudioDevices.isMuted)
         lastBrightness = DisplayBrightness.value
+        lastKeyboard = KeyboardBrightness.value
 
         if handlesVolume {
             // Affiche le HUD à chaque changement de volume, d'où qu'il vienne (touches, réglages, autre app).
@@ -108,9 +125,11 @@ final class SystemHUDModule: IslandModule {
         updateBrightnessPolling()
     }
 
-    /// Sans interception des touches, pas d'événement public pour la luminosité : on la surveille.
+    /// Pas d'événement public pour les luminosités : on les surveille. Celle de l'écran seulement
+    /// sans interception des touches ; celle du clavier toujours (pas de touche dédiée sur les Mac récents).
     private func updateBrightnessPolling() {
-        let needsPolling = isRunning && handlesBrightness && keyTap == nil
+        let needsPolling = isRunning
+            && ((handlesBrightness && keyTap == nil) || (handlesKeyboard && KeyboardBrightness.isAvailable))
         if needsPolling, brightnessTimer == nil {
             brightnessTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.pollBrightness() }
@@ -176,6 +195,8 @@ final class SystemHUDModule: IslandModule {
     private func handle(_ key: MediaKey, modifiers: NSEvent.ModifierFlags) -> Bool {
         // ⌥ + touche ouvre les réglages système correspondants : on laisse faire macOS.
         if modifiers.contains(.option) && !modifiers.contains(.shift) { return false }
+        // Île masquée (plein écran) : notre jauge serait invisible, on laisse le HUD de macOS.
+        if IslandVisibility.isHiddenOnActiveScreen { return false }
         let step: Float = (fineSteps || modifiers.contains([.option, .shift])) ? 1 / 32 : 1 / 16
 
         switch key {
@@ -213,14 +234,21 @@ final class SystemHUDModule: IslandModule {
     }
 
     private func pollBrightness() {
-        guard let value = DisplayBrightness.value else { return }
-        defer { lastBrightness = value }
-        if let last = lastBrightness, abs(last - value) > 0.001 { showHUD(.brightness) }
+        if handlesBrightness, keyTap == nil, let value = DisplayBrightness.value {
+            if let last = lastBrightness, abs(last - value) > 0.001 { showHUD(.brightness) }
+            lastBrightness = value
+        }
+        if handlesKeyboard, let value = KeyboardBrightness.value {
+            if let last = lastKeyboard, abs(last - value) > 0.001 { showHUD(.keyboard) }
+            lastKeyboard = value
+        }
     }
 
     // MARK: Affichage
 
-    func showHUD(_ kind: HUDKind) {
+    /// `fromHUD` : réglage fait sur la jauge du HUD elle-même, toujours affiché.
+    func showHUD(_ kind: HUDKind, fromHUD: Bool = false) {
+        if !fromHUD, !showsInAppChanges, Date.now < Self.inAppChangeUntil { return }
         let value: Double
         let symbol: String
         let muted = kind == .volume && AudioDevices.isMuted
@@ -232,6 +260,9 @@ final class SystemHUDModule: IslandModule {
         case .brightness:
             value = Double(DisplayBrightness.value ?? 0)
             symbol = value < 0.5 ? "sun.min.fill" : "sun.max.fill"
+        case .keyboard:
+            value = Double(KeyboardBrightness.value ?? 0)
+            symbol = value < 0.5 ? "light.min" : "light.max"
         }
 
         let label = Text("\(Int((value * 100).rounded())) %").monospacedDigit()
@@ -273,8 +304,11 @@ final class SystemHUDModule: IslandModule {
         case .brightness:
             DisplayBrightness.set(Float(value))
             lastBrightness = DisplayBrightness.value
+        case .keyboard:
+            KeyboardBrightness.set(Float(value))
+            lastKeyboard = KeyboardBrightness.value
         }
-        showHUD(kind)
+        showHUD(kind, fromHUD: true)
     }
 }
 
@@ -323,6 +357,7 @@ private struct SystemHUDSettingsView: View {
     @Bindable var module: SystemHUDModule
 
     var body: some View {
+        SettingsSubheader(tr("Fonctionnement", "How it works"))
         PickerRow(tr("Mode", "Mode"),
                   subtitle: module.mode == .replace
                       ? tr("Intercepte les touches : seul le HUD de macland s'affiche.",
@@ -348,25 +383,35 @@ private struct SystemHUDSettingsView: View {
                 Button(tr("Réglages", "Settings")) { module.openAccessibilitySettings() }
             }
         }
+        ToggleRow(tr("Pas fins", "Fine steps"),
+                  subtitle: tr("Réglage par 1/32 au lieu de 1/16 (mode Remplacer).", "Adjust in 1/32 steps instead of 1/16 (Replace mode)."),
+                  isOn: $module.fineSteps)
+        SettingsSubheader(tr("Afficher la jauge pour", "Show the gauge for"))
+        ToggleRow(tr("Volume", "Volume"), isOn: $module.handlesVolume)
+        ToggleRow(tr("Luminosité de l'écran", "Display brightness"),
+                  subtitle: DisplayBrightness.isAvailable ? nil : tr("Indisponible sur cet écran.", "Not available on this display."),
+                  isOn: $module.handlesBrightness)
+        ToggleRow(tr("Luminosité du clavier", "Keyboard brightness"),
+                  subtitle: KeyboardBrightness.isAvailable ? nil : tr("Pas de clavier rétroéclairé détecté.", "No backlit keyboard detected."),
+                  isOn: $module.handlesKeyboard)
+        ToggleRow(tr("Changements faits depuis l'île", "Changes made from the island"),
+                  subtitle: tr("Affiche aussi la jauge quand tu règles depuis la page Contrôles.",
+                               "Also show the gauge when you adjust from the Controls page."),
+                  isOn: $module.showsInAppChanges)
+        SettingsSubheader(tr("Affichage", "Display"))
         PickerRow(tr("Style", "Style"), subtitle: module.style == .extended
                       ? tr("Barre sous l'encoche, réglable à la souris.", "Bar below the notch, adjustable with the mouse.")
                       : tr("Icône et jauge de part et d'autre de l'encoche.", "Icon and gauge on either side of the notch."),
                   selection: $module.style) {
             ForEach(HUDStyle.allCases) { Text($0.label).tag($0) }
         }
-        ToggleRow(tr("Volume", "Volume"), isOn: $module.handlesVolume)
-        ToggleRow(tr("Luminosité", "Brightness"),
-                  subtitle: DisplayBrightness.isAvailable ? nil : tr("Indisponible sur cet écran.", "Not available on this display."),
-                  isOn: $module.handlesBrightness)
         ToggleRow(tr("Pourcentage", "Percentage"), isOn: $module.showPercentage)
-        ToggleRow(tr("Pas fins", "Fine steps"),
-                  subtitle: tr("Réglage par 1/32 au lieu de 1/16 (mode Remplacer).", "Adjust in 1/32 steps instead of 1/16 (Replace mode)."),
-                  isOn: $module.fineSteps)
         SliderRow(tr("Durée d'affichage", "Display duration"), value: $module.duration, range: 0.8...4, step: 0.1) { String(format: "%.1f s", $0) }
         SettingsRow(tr("Essayer", "Try it")) {
             HStack {
-                Button(tr("Volume", "Volume")) { module.showHUD(.volume) }
-                Button(tr("Luminosité", "Brightness")) { module.showHUD(.brightness) }
+                Button(tr("Volume", "Volume")) { module.showHUD(.volume, fromHUD: true) }
+                Button(tr("Écran", "Display")) { module.showHUD(.brightness, fromHUD: true) }
+                Button(tr("Clavier", "Keyboard")) { module.showHUD(.keyboard, fromHUD: true) }
             }
         }
     }

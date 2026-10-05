@@ -39,6 +39,7 @@ final class NowPlayingModule: IslandModule {
         "hideWhenIdle": true,
         "skipMode": SkipMode.track.rawValue,
         "showOutputPicker": true,
+        "animatedEqualizer": true,
     ])
 
     /// Pochette + égaliseur autour de l'encoche fermée pendant la lecture.
@@ -51,6 +52,8 @@ final class NowPlayingModule: IslandModule {
     var skipMode: SkipMode { didSet { store.set(skipMode.rawValue, "skipMode") } }
     /// Bouton de choix de la sortie audio (haut-parleurs, AirPods…).
     var showOutputPicker: Bool { didSet { store.set(showOutputPicker, "showOutputPicker") } }
+    /// Barres animées pendant la lecture (sinon fixes, pour économiser la batterie).
+    var animatedEqualizer: Bool { didSet { store.set(animatedEqualizer, "animatedEqualizer"); updateActivity() } }
 
     private(set) var info: NowPlayingInfo?
     private(set) var artwork: NSImage?
@@ -76,6 +79,7 @@ final class NowPlayingModule: IslandModule {
         hideWhenIdle = store.bool("hideWhenIdle")
         skipMode = SkipMode(rawValue: store.string("skipMode")) ?? .track
         showOutputPicker = store.bool("showOutputPicker")
+        animatedEqualizer = store.bool("animatedEqualizer")
 
         adapter.onUpdate = { [weak self] info, artwork in self?.update(info: info, artwork: artwork) }
         adapter.onFailure = { [weak self] message in self?.error = message }
@@ -88,7 +92,11 @@ final class NowPlayingModule: IslandModule {
 
     /// Claire sur fond noir, foncée sur fond pastel.
     func accent(onDarkBackground dark: Bool) -> Color {
-        guard artworkTint, let artworkHue else { return dark ? .white : .black.opacity(0.8) }
+        guard artworkTint, let artworkHue else {
+            let accent = IslandSettings.shared.islandAccent
+            if accent != .neutral { return accent.color }
+            return dark ? .white : .black.opacity(0.8)
+        }
         return Color(hue: artworkHue.hue, saturation: min(1, artworkHue.saturation * 1.4),
                      brightness: dark ? 0.9 : 0.45)
     }
@@ -213,7 +221,7 @@ final class NowPlayingModule: IslandModule {
         ActivityCenter.shared.show(LiveActivity(id: "nowPlaying", priority: -1, duration: nil) {
             ArtworkView(image: artwork, size: 22, cornerRadius: 5)
         } trailing: {
-            EqualizerBars(color: accent, isPlaying: info.isPlaying)
+            EqualizerBars(color: accent, isPlaying: info.isPlaying && animatedEqualizer)
                 .frame(width: 20, height: 14)
         })
     }
@@ -433,24 +441,69 @@ struct ArtworkView: View {
 }
 
 /// Égaliseur décoratif (le vrai spectre audio demanderait une capture du son système).
-struct EqualizerBars: View {
+///
+/// Animé par Core Animation : le serveur graphique fait bouger les barres lui-même, sans
+/// recalculer l'île à chaque image (une version SwiftUI coûtait 5 à 10 % de CPU en continu).
+struct EqualizerBars: NSViewRepresentable {
     let color: Color
     let isPlaying: Bool
 
-    private static let speeds: [Double] = [5.1, 7.3, 4.2, 6.4]
-    private static let phases: [Double] = [0, 1.3, 2.6, 0.7]
+    func makeNSView(context: Context) -> EqualizerView { EqualizerView() }
 
-    var body: some View {
-        TimelineView(.animation(paused: !isPlaying)) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(0..<4) { index in
-                    let level = isPlaying ? (sin(time * Self.speeds[index] + Self.phases[index]) + 1) / 2 : 0
-                    Capsule()
-                        .fill(color)
-                        .frame(maxHeight: .infinity)
-                        .scaleEffect(y: 0.25 + 0.75 * level)
-                }
+    func updateNSView(_ view: EqualizerView, context: Context) {
+        view.update(color: NSColor(color), isPlaying: isPlaying)
+    }
+}
+
+final class EqualizerView: NSView {
+    private static let durations: [Double] = [0.62, 0.44, 0.75, 0.53]
+    /// Hauteurs des barres immobiles.
+    private static let restLevels: [CGFloat] = [0.45, 0.9, 0.6, 0.75]
+
+    private let bars: [CALayer] = (0..<4).map { _ in CALayer() }
+    private var isAnimating = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        bars.forEach { layer?.addSublayer($0) }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) n'est pas utilisé") }
+
+    override func layout() {
+        super.layout()
+        let spacing: CGFloat = 2
+        let width = (bounds.width - spacing * CGFloat(bars.count - 1)) / CGFloat(bars.count)
+        for (index, bar) in bars.enumerated() {
+            bar.bounds = CGRect(x: 0, y: 0, width: width, height: bounds.height)
+            bar.position = CGPoint(x: CGFloat(index) * (width + spacing) + width / 2, y: bounds.midY)
+            bar.cornerRadius = width / 2
+        }
+    }
+
+    func update(color: NSColor, isPlaying: Bool) {
+        #if DEBUG
+        // Mesures GPU : égaliseur figé.
+        let isPlaying = isPlaying && !CommandLine.arguments.contains("--static-equalizer")
+        #endif
+        bars.forEach { $0.backgroundColor = color.cgColor }
+        guard isPlaying != isAnimating || bars.first?.animationKeys() == nil else { return }
+        isAnimating = isPlaying
+        for (index, bar) in bars.enumerated() {
+            bar.removeAllAnimations()
+            if isPlaying {
+                let animation = CABasicAnimation(keyPath: "transform.scale.y")
+                animation.fromValue = 0.25
+                animation.toValue = 1
+                animation.duration = Self.durations[index]
+                animation.autoreverses = true
+                animation.repeatCount = .infinity
+                animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                animation.timeOffset = Double(index) * 0.17
+                bar.add(animation, forKey: "bounce")
+            } else {
+                bar.transform = CATransform3DMakeScale(1, Self.restLevels[index], 1)
             }
         }
     }
@@ -458,22 +511,28 @@ struct EqualizerBars: View {
 
 private extension NSImage {
     /// Teinte et saturation de la couleur moyenne de l'image.
+    /// Calculée sur une version 16×16 de l'image : même résultat, sans décompresser la pochette
+    /// en pleine résolution (une grande pochette coûtait des dizaines de Mo à chaque morceau).
     var dominantHue: (hue: Double, saturation: Double)? {
-        guard let tiff = tiffRepresentation, let input = CIImage(data: tiff),
-              let filter = CIFilter(name: "CIAreaAverage", parameters: [
-                  kCIInputImageKey: input,
-                  kCIInputExtentKey: CIVector(cgRect: input.extent),
-              ]),
-              let output = filter.outputImage
+        let side = 16
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = CGContext(data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
         else { return nil }
+        context.interpolationQuality = .medium
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
 
-        var pixel = [UInt8](repeating: 0, count: 4)
-        CIContext(options: [.workingColorSpace: NSNull()]).render(
-            output, toBitmap: &pixel, rowBytes: 4,
-            bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
-
-        let average = NSColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
-                              blue: CGFloat(pixel[2]) / 255, alpha: 1)
+        var totals = (red: 0, green: 0, blue: 0)
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            totals.red += Int(pixels[index])
+            totals.green += Int(pixels[index + 1])
+            totals.blue += Int(pixels[index + 2])
+        }
+        let count = CGFloat(side * side * 255)
+        let average = NSColor(red: CGFloat(totals.red) / count, green: CGFloat(totals.green) / count,
+                              blue: CGFloat(totals.blue) / count, alpha: 1)
         var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
         average.usingColorSpace(.deviceRGB)?.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
         return (Double(hue), Double(saturation))
@@ -491,12 +550,7 @@ private struct NowPlayingSettingsView: View {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
         }
-        ToggleRow(tr("Activité pendant la lecture", "Activity while playing"),
-                  subtitle: tr("Pochette et égaliseur autour de l'encoche fermée.", "Artwork and equalizer around the closed notch."),
-                  isOn: $module.liveActivity)
-        ToggleRow(tr("Couleur de la pochette", "Artwork color"),
-                  subtitle: tr("Teinte l'égaliseur et la barre de progression.", "Tints the equalizer and progress bar."),
-                  isOn: $module.artworkTint)
+        SettingsSubheader(tr("Île ouverte", "Open island"))
         ToggleRow(tr("Barre de progression", "Progress bar"),
                   subtitle: tr("Fais-la glisser pour te déplacer dans le morceau.", "Drag it to scrub through the track."),
                   isOn: $module.showProgress)
@@ -512,5 +566,17 @@ private struct NowPlayingSettingsView: View {
         ToggleRow(tr("Masquer quand rien ne joue", "Hide when nothing is playing"),
                   subtitle: tr("Libère la place pour les autres widgets.", "Frees up room for the other widgets."),
                   isOn: $module.hideWhenIdle)
+        SettingsSubheader(tr("Autour de l'encoche", "Around the notch"))
+        ToggleRow(tr("Activité pendant la lecture", "Activity while playing"),
+                  subtitle: tr("Pochette et égaliseur autour de l'encoche fermée.", "Artwork and equalizer around the closed notch."),
+                  isOn: $module.liveActivity)
+        ToggleRow(tr("Égaliseur animé", "Animated equalizer"),
+                  subtitle: tr("Désactive l'animation pour économiser un peu de batterie.",
+                               "Turn off the animation to save a little battery."),
+                  isOn: $module.animatedEqualizer)
+        SettingsSubheader(tr("Couleurs", "Colors"))
+        ToggleRow(tr("Couleur de la pochette", "Artwork color"),
+                  subtitle: tr("Teinte l'égaliseur et la barre de progression.", "Tints the equalizer and progress bar."),
+                  isOn: $module.artworkTint)
     }
 }

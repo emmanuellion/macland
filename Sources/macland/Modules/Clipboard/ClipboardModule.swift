@@ -185,6 +185,9 @@ final class ClipboardModule: IslandModule {
         timer = nil
         hotKey?.unregister()
         hotKey = nil
+        images.removeAll()
+        // Sans persistance, les images copiées ne doivent pas rester sur le disque.
+        if !persist { try? FileManager.default.removeItem(at: Self.directory) }
     }
 
     // MARK: Capture
@@ -226,7 +229,6 @@ final class ClipboardModule: IslandModule {
               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
         try? FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         guard (try? png.write(to: Self.directory.appending(path: fileName))) != nil else { return }
-        images[id] = image
         insert(ClipboardItem(id: id, kind: .image, imageFile: fileName, date: .now, sourceBundleID: source))
     }
 
@@ -263,7 +265,7 @@ final class ClipboardModule: IslandModule {
         case .files:
             pasteboard.writeObjects((item.fileURLs ?? []) as [NSURL])
         case .image:
-            if let image = image(for: item) { pasteboard.writeObjects([image]) }
+            if let image = fullImage(for: item) { pasteboard.writeObjects([image]) }
         }
         lastChangeCount = pasteboard.changeCount
 
@@ -303,11 +305,26 @@ final class ClipboardModule: IslandModule {
         items.filter { !$0.isPinned }.forEach(remove)
     }
 
+    /// Vignette (≤ 480 px) pour l'affichage. Le cache ne garde que des vignettes : une capture 5K
+    /// affichée en pleine taille occupait à elle seule ~60 Mo.
     func image(for item: ClipboardItem) -> NSImage? {
         if let cached = images[item.id] { return cached }
-        guard let file = item.imageFile, let image = NSImage(contentsOf: Self.directory.appending(path: file)) else { return nil }
+        guard let file = item.imageFile,
+              let source = CGImageSourceCreateWithURL(Self.directory.appending(path: file) as CFURL, nil),
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 480,
+              ] as CFDictionary)
+        else { return nil }
+        let image = NSImage(cgImage: thumbnail, size: NSSize(width: thumbnail.width, height: thumbnail.height))
         images[item.id] = image
         return image
+    }
+
+    /// Image d'origine, lue sur le disque au moment de la copier.
+    private func fullImage(for item: ClipboardItem) -> NSImage? {
+        item.imageFile.flatMap { NSImage(contentsOf: Self.directory.appending(path: $0)) }
     }
 
     // MARK: Apps ignorées
@@ -379,21 +396,21 @@ final class ClipboardModule: IslandModule {
         guard didLoad else { return }
         if persist {
             try? FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
-            try? JSONEncoder().encode(items).write(to: Self.indexFile)
+            try? JSONEncoder().encode(items).write(to: Self.indexFile, options: .atomic)
         } else {
             try? FileManager.default.removeItem(at: Self.indexFile)
         }
     }
 
     private func load() {
-        guard persist,
-              let data = try? Data(contentsOf: Self.indexFile),
-              let saved = try? JSONDecoder().decode([ClipboardItem].self, from: data)
-        else {
+        guard persist else {
             // Sans persistance, les images d'une session précédente ne servent plus.
             try? FileManager.default.removeItem(at: Self.directory)
             return
         }
+        // Historique illisible : on ne supprime rien (les éléments épinglés sont peut-être dedans).
+        guard let data = try? Data(contentsOf: Self.indexFile),
+              let saved = try? JSONDecoder().decode([ClipboardItem].self, from: data) else { return }
         items = saved
     }
 }
@@ -582,6 +599,7 @@ private struct ClipboardSettingsView: View {
     @Bindable var module: ClipboardModule
 
     var body: some View {
+        SettingsSubheader(tr("Utilisation", "Usage"))
         PickerRow(tr("Raccourci d'ouverture", "Open shortcut"),
                   subtitle: module.shortcutConflict
                       ? tr("Ce raccourci est déjà utilisé par une autre app.", "This shortcut is already used by another app.")
@@ -589,17 +607,6 @@ private struct ClipboardSettingsView: View {
                   selection: $module.shortcut) {
             ForEach(ClipboardShortcut.allCases) { Text($0.label).tag($0) }
         }
-        SliderRow(tr("Taille de l'historique", "History size"),
-                  subtitle: tr("Les éléments épinglés ne comptent pas.", "Pinned items don't count."),
-                  value: $module.maxItems, range: 10...200, step: 10) { "\(Int($0))" }
-        ToggleRow(tr("Conserver après redémarrage", "Keep after restart"), isOn: $module.persist)
-        ToggleRow(tr("Ignorer les mots de passe", "Ignore passwords"),
-                  subtitle: tr("Ne garde pas ce que les gestionnaires de mots de passe signalent comme confidentiel.",
-                               "Doesn't keep what password managers mark as confidential."),
-                  isOn: $module.ignoreConcealed)
-        ToggleRow(tr("Images entières", "Full images"),
-                  subtitle: tr("Sinon, les images sont rognées pour remplir la carte.", "Otherwise, images are cropped to fill the card."),
-                  isOn: $module.fullImages)
         ToggleRow(tr("Fermer l'île après une copie", "Close island after copying"), isOn: $module.closeAfterCopy)
         ToggleRow(tr("Coller automatiquement", "Paste automatically"),
                   subtitle: module.autoPaste && !module.hasAccessibility
@@ -608,12 +615,25 @@ private struct ClipboardSettingsView: View {
                       : tr("Colle directement dans l'app active (permission Accessibilité).",
                            "Pastes straight into the active app (Accessibility permission)."),
                   isOn: $module.autoPaste)
+        SettingsSubheader(tr("Historique", "History"))
+        SliderRow(tr("Taille de l'historique", "History size"),
+                  subtitle: tr("Les éléments épinglés ne comptent pas.", "Pinned items don't count."),
+                  value: $module.maxItems, range: 10...200, step: 10) { "\(Int($0))" }
+        ToggleRow(tr("Conserver après redémarrage", "Keep after restart"), isOn: $module.persist)
+        ToggleRow(tr("Images entières", "Full images"),
+                  subtitle: tr("Sinon, les images sont rognées pour remplir la carte.", "Otherwise, images are cropped to fill the card."),
+                  isOn: $module.fullImages)
         SettingsRow(tr("Historique", "History"),
                     subtitle: tr("\(module.items.count) élément\(module.items.count > 1 ? "s" : "")",
                                  "\(module.items.count) item\(module.items.count == 1 ? "" : "s")")) {
             Button(tr("Vider", "Clear"), role: .destructive) { module.clear() }
                 .disabled(module.items.isEmpty)
         }
+        SettingsSubheader(tr("Confidentialité", "Privacy"))
+        ToggleRow(tr("Ignorer les mots de passe", "Ignore passwords"),
+                  subtitle: tr("Ne garde pas ce que les gestionnaires de mots de passe signalent comme confidentiel.",
+                               "Doesn't keep what password managers mark as confidential."),
+                  isOn: $module.ignoreConcealed)
         SettingsSubheader(tr("Apps ignorées", "Ignored apps"))
         ForEach(module.ignoredApps, id: \.self) { bundleID in
             SettingsRow(ClipboardModule.appName(bundleID), subtitle: bundleID) {

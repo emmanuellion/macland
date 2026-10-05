@@ -27,13 +27,23 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+/// Écrans dont l'île est masquée (app en plein écran), consulté par le HUD.
+@MainActor
+enum IslandVisibility {
+    static var hiddenDisplays: Set<CGDirectDisplayID> = []
+
+    /// L'île de l'écran actif est-elle masquée ?
+    static var isHiddenOnActiveScreen: Bool {
+        guard let display = NSScreen.main?.displayID else { return false }
+        return hiddenDisplays.contains(display)
+    }
+}
+
 /// Gère l'île d'un écran : position de la fenêtre, survol de la souris, ouverture/fermeture.
 @MainActor
 final class NotchWindowController {
     /// Taille maximale réservée au panneau (doit couvrir les valeurs max des réglages + l'ombre).
     private static let panelSize = CGSize(width: 900, height: 360)
-    /// Marge de tolérance autour de l'encoche pour déclencher le survol.
-    private static let hoverPadding: CGFloat = 4
 
     let screen: NSScreen
     private let model: NotchViewModel
@@ -58,11 +68,16 @@ final class NotchWindowController {
         updateFrame()
         panel.orderFrontRegardless()
         installMouseMonitors()
+        installFullScreenWatch()
+        updateFullScreenVisibility()
     }
 
     func close() {
+        if let display = screen.displayID { IslandVisibility.hiddenDisplays.remove(display) }
         monitors.forEach(NSEvent.removeMonitor)
         monitors.removeAll()
+        workspaceObservers.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
+        workspaceObservers.removeAll()
         pendingAction?.cancel()
         panel.orderOut(nil)
         panel.close()
@@ -86,7 +101,7 @@ final class NotchWindowController {
     /// l'île ouverte croyait la souris sortie, se refermait, puis se rouvrait en boucle.
     private var activeRect: NSRect {
         let size = model.shapeSize
-        let padding = Self.hoverPadding
+        let padding = CGFloat(settings.hoverPadding)
         return NSRect(x: screen.frame.midX - size.width / 2 - padding,
                       y: screen.frame.maxY - size.height - padding,
                       width: size.width + 2 * padding,
@@ -115,6 +130,11 @@ final class NotchWindowController {
         #if DEBUG
         if debugPinned { return }
         #endif
+        // Masquée pour le plein écran : invisible, elle ne doit pas non plus réagir.
+        guard !isHiddenForFullScreen else {
+            panel.ignoresMouseEvents = true
+            return
+        }
         let inside = activeRect.contains(NSEvent.mouseLocation)
         panel.ignoresMouseEvents = !inside
 
@@ -153,10 +173,12 @@ final class NotchWindowController {
 
     // MARK: Commandes
 
-    var containsMouse: Bool { screen.frame.contains(NSEvent.mouseLocation) }
+    /// Bord supérieur inclus : tout en haut, le curseur est exactement sur `maxY`.
+    var containsMouse: Bool { screen.frame.insetBy(dx: 0, dy: -1).contains(NSEvent.mouseLocation) }
 
     /// Ouvre l'île sur une page ; la referme si cette page est déjà affichée.
     func open(page: String) {
+        guard !isHiddenForFullScreen else { return }
         cancelPending()
         if model.isExpanded && model.selectedPage == page {
             collapse()
@@ -178,8 +200,41 @@ final class NotchWindowController {
         if debugPinned { return }
         #endif
         dragChangeCountAtMouseDown = NSPasteboard(name: .drag).changeCount
-        guard model.isExpanded, !activeRect.contains(NSEvent.mouseLocation) else { return }
+        guard settings.closeOnClickOutside, model.isExpanded, !activeRect.contains(NSEvent.mouseLocation) else { return }
         collapse()
+    }
+
+    // MARK: Plein écran
+
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var isHiddenForFullScreen = false
+
+    /// Changement d'espace ou d'app active : une app vient peut-être de passer en plein écran.
+    private func installFullScreenWatch() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+            workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                // Laisse le temps à l'animation du plein écran de se terminer.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    MainActor.assumeIsolated { self?.updateFullScreenVisibility() }
+                }
+            })
+        }
+    }
+
+    func updateFullScreenVisibility() {
+        let hide = settings.hideInFullScreen && FullScreenDetector.isFullScreenApp(on: screen)
+        guard hide != isHiddenForFullScreen else { return }
+        isHiddenForFullScreen = hide
+        if let display = screen.displayID {
+            if hide { IslandVisibility.hiddenDisplays.insert(display) } else { IslandVisibility.hiddenDisplays.remove(display) }
+        }
+        if hide {
+            collapse()
+            panel.orderOut(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
     }
 
     private func schedule(after delay: Double, _ action: @escaping @MainActor () -> Void) {

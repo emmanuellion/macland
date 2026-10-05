@@ -63,8 +63,12 @@ enum FileActions {
 
     // MARK: Utilitaires
 
+    /// À côté de l'original, sauf s'il est dans le dossier privé de l'étagère (mode copie) :
+    /// le résultat serait supprimé avec la copie. Téléchargements sinon.
     private static func outputFolder(near url: URL) -> URL {
         let folder = url.deletingLastPathComponent()
+        let shelfFolder = URL.applicationSupportDirectory.appending(path: "macland").standardizedFileURL.path
+        if folder.standardizedFileURL.path.hasPrefix(shelfFolder) { return URL.downloadsDirectory }
         return FileManager.default.isWritableFile(atPath: folder.path) ? folder : URL.downloadsDirectory
     }
 

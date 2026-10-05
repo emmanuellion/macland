@@ -4,6 +4,7 @@ import SwiftUI
 enum SettingsPage: Hashable {
     case general
     case appearance
+    case layout
     case activities
     case module(String)
 }
@@ -17,8 +18,129 @@ final class SettingsNavigation {
     var selection = SettingsPage.general
     var hovered: SettingsPage?
     var previewExpanded = true
+    /// Texte de la barre de recherche.
+    var query = ""
+    /// Tous les réglages trouvables, récoltés par l'index invisible.
+    var index: [SearchEntry] = []
+    /// Réglage mis en évidence après un clic sur un résultat de recherche.
+    var highlighted: String?
+    /// Réglage vers lequel faire défiler la page.
+    var scrollTarget: String?
+    /// Module en cours de glisser-déposer dans la page Disposition.
+    var draggedModule: String?
+
+    /// Démarre un glisser. Un glisser annulé (lâché hors d'une zone, Échap) ne prévient pas
+    /// SwiftUI : on surveille donc le bouton de la souris pour remettre l'état à zéro.
+    func beginDrag(_ id: String) {
+        draggedModule = id
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
+                timer.invalidate()
+                if self?.draggedModule == id { self?.draggedModule = nil }
+            }
+        }
+    }
+    /// Sections repliées de la barre latérale (mémorisées).
+    var collapsedSections: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "settingsCollapsedSections") ?? []) {
+        didSet { UserDefaults.standard.set(Array(collapsedSections), forKey: "settingsCollapsedSections") }
+    }
+
+    func toggleSection(_ id: String) {
+        if collapsedSections.contains(id) { collapsedSections.remove(id) } else { collapsedSections.insert(id) }
+    }
 
     private init() {}
+
+    var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Résultats regroupés par page : les pages les plus pertinentes d'abord, puis l'ordre de la barre latérale.
+    var results: [(page: SettingsPage, entries: [SearchEntry])] {
+        let matches = index.filter { $0.page != nil && SettingsSearch.matches($0, query: query) }
+        var seen = Set<SearchEntry>()
+        let unique = matches.filter { seen.insert(SearchEntry(title: $0.title, page: $0.page)).inserted }
+        let groups = SettingsPage.ordered.enumerated().compactMap { order, page -> (page: SettingsPage, entries: [SearchEntry], score: Int, order: Int)? in
+            let entries = unique.filter { $0.page == page }
+                .sorted { SettingsSearch.score($0, query: query) > SettingsSearch.score($1, query: query) }
+            guard let best = entries.first else { return nil }
+            return (page, entries, SettingsSearch.score(best, query: query), order)
+        }
+        return groups
+            .sorted { ($0.score, -$0.order) > ($1.score, -$1.order) }
+            .map { ($0.page, $0.entries) }
+    }
+
+    /// Ouvre la page du réglage, y fait défiler et le met en évidence un instant.
+    func reveal(_ entry: SearchEntry) {
+        guard let page = entry.page else { return }
+        selection = page
+        query = ""
+        scrollTarget = entry.title
+        highlighted = entry.title
+        let title = entry.title
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            if self?.highlighted == title { self?.highlighted = nil }
+        }
+    }
+}
+
+extension SettingsPage {
+    /// Ordre d'affichage : pages générales, puis modules dans l'ordre de la barre latérale.
+    @MainActor
+    static var ordered: [SettingsPage] {
+        [.general, .appearance, .layout, .activities] + SidebarGroup.allCases.flatMap { group in
+            group.modules.map { SettingsPage.module($0.id) }
+        }
+    }
+
+    @MainActor
+    var title: String {
+        switch self {
+        case .general: tr("Général", "General")
+        case .appearance: tr("Apparence", "Appearance")
+        case .layout: tr("Disposition", "Layout")
+        case .activities: tr("Activités en direct", "Live Activities")
+        case .module(let id): ModuleRegistry.shared.module(id: id)?.name ?? id
+        }
+    }
+
+    @MainActor
+    var icon: (systemImage: String, tint: Color) {
+        switch self {
+        case .general: ("gearshape.fill", .gray)
+        case .appearance: ("paintbrush.pointed.fill", .blue)
+        case .layout: ("rectangle.3.group.fill", .indigo)
+        case .activities: ("bolt.fill", .orange)
+        case .module(let id):
+            ModuleRegistry.shared.module(id: id).map { ($0.systemImage, $0.tint) } ?? ("questionmark", .gray)
+        }
+    }
+}
+
+/// Groupes de modules de la barre latérale, selon l'endroit où ils s'affichent.
+enum SidebarGroup: String, CaseIterable {
+    case home, tabs, notch, background
+
+    var title: String {
+        switch self {
+        case .home: tr("Accueil de l'île", "Island home")
+        case .tabs: tr("Onglets", "Tabs")
+        case .notch: tr("Autour de l'encoche", "Around the notch")
+        case .background: tr("En arrière-plan", "In the background")
+        }
+    }
+
+    @MainActor
+    var modules: [any IslandModule] {
+        ModuleRegistry.shared.orderedModules.filter { module in
+            switch self {
+            case .home: module.kind == .widget
+            case .tabs: module.kind == .page
+            case .notch: module.kind == .background
+            case .background: module.kind == .service
+            }
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -27,38 +149,83 @@ struct SettingsView: View {
     var body: some View {
         HStack(spacing: 0) {
             SettingsSidebar()
-                .frame(width: 250)
+                .frame(width: 260)
                 .background(VisualEffectBackground(material: .sidebar))
 
-            ScrollView {
-                Group {
-                    switch navigation.selection {
-                    case .general: GeneralPage()
-                    case .appearance: AppearancePage()
-                    case .activities: ActivitiesPage()
-                    case .module(let id):
-                        if let module = ModuleRegistry.shared.module(id: id) { ModulePage(module: module) }
-                    }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    page(navigation.selection)
+                        // Colonne de lecture centrée : les lignes ne s'étirent pas sur toute la fenêtre.
+                        .frame(maxWidth: 640, alignment: .leading)
+                        .padding(.horizontal, 44)
+                        .padding(.top, 60)
+                        .padding(.bottom, 48)
+                        .frame(maxWidth: .infinity)
+                        .id(navigation.selection)
                 }
-                // Colonne de lecture centrée : les lignes ne s'étirent pas sur toute la fenêtre.
-                .frame(maxWidth: 640, alignment: .leading)
-                .padding(.horizontal, 44)
-                .padding(.top, 64)
-                .padding(.bottom, 48)
-                .frame(maxWidth: .infinity)
+                .scrollIndicators(.automatic)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .onChange(of: navigation.scrollTarget) { _, target in
+                    guard let target else { return }
+                    // La nouvelle page doit être affichée et mise en page avant de défiler :
+                    // on réessaie un peu plus tard pour les réglages tout en bas des longues pages.
+                    for delay in [0.1, 0.35] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            withAnimation(.smooth) { proxy.scrollTo(target, anchor: .center) }
+                        }
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { navigation.scrollTarget = nil }
+                }
             }
-            .scrollIndicators(.automatic)
-            .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(minWidth: 900, minHeight: 620)
+        .frame(minWidth: 920, minHeight: 640)
         .ignoresSafeArea()
         .environment(\.locale, IslandSettings.shared.locale)
+        .background(alignment: .topLeading) {
+            // Index invisible pour la recherche : toutes les pages, rendues hors écran.
+            if navigation.isSearching { SearchIndexer() }
+        }
+    }
+
+    @ViewBuilder
+    fileprivate func page(_ page: SettingsPage) -> some View {
+        switch page {
+        case .general: GeneralPage()
+        case .appearance: AppearancePage()
+        case .layout: LayoutPage()
+        case .activities: ActivitiesPage()
+        case .module(let id):
+            if let module = ModuleRegistry.shared.module(id: id) { ModulePage(module: module) }
+        }
+    }
+}
+
+/// Affiche toutes les pages de façon invisible pour récolter les réglages trouvables.
+private struct SearchIndexer: View {
+    var body: some View {
+        VStack {
+            ForEach(SettingsPage.ordered, id: \.self) { page in
+                SettingsView().page(page)
+                    .searchPage(page)
+            }
+        }
+        .frame(width: 600)
+        .fixedSize(horizontal: false, vertical: true)
+        .hidden()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .frame(width: 0, height: 0)
+        .clipped()
+        .onPreferenceChange(SearchEntriesKey.self) { entries in
+            SettingsNavigation.shared.index = entries
+        }
     }
 }
 
 // MARK: - Barre latérale
 
 private struct SettingsSidebar: View {
+    @Bindable private var navigation = SettingsNavigation.shared
     private let registry = ModuleRegistry.shared
 
     var body: some View {
@@ -71,7 +238,7 @@ private struct SettingsSidebar: View {
                         .fill(.black)
                         .frame(width: 20, height: 7)
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 34, height: 34)
                 .shadow(color: .purple.opacity(0.25), radius: 4, y: 2)
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -80,28 +247,42 @@ private struct SettingsSidebar: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 56)
-            .padding(.bottom, 24)
+            .padding(.top, 54)
+            .padding(.bottom, 16)
+
+            SearchField(text: $navigation.query)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 3) {
-                    SidebarItem(page: .general, title: tr("Général", "General"), systemImage: "gearshape.fill", tint: .gray)
-                    SidebarItem(page: .appearance, title: tr("Apparence", "Appearance"), systemImage: "paintbrush.pointed.fill", tint: .blue)
-                    SidebarItem(page: .activities, title: tr("Activités en direct", "Live Activities"), systemImage: "bolt.fill", tint: .orange)
-
-                    Text(tr("Modules", "Modules"))
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                if navigation.isSearching {
+                    SearchResults()
                         .padding(.horizontal, 12)
-                        .padding(.top, 22)
-                        .padding(.bottom, 6)
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        SidebarHeader(id: "settings", title: tr("Réglages", "Settings"))
+                        if !navigation.collapsedSections.contains("settings") {
+                            SidebarItem(page: .general)
+                            SidebarItem(page: .appearance)
+                            SidebarItem(page: .layout)
+                            SidebarItem(page: .activities)
+                        }
 
-                    ForEach(registry.orderedModules, id: \.id) { module in
-                        SidebarItem(page: .module(module.id), title: module.name, systemImage: module.systemImage,
-                                    tint: module.tint, isOn: registry.isEnabled(module))
+                        ForEach(SidebarGroup.allCases, id: \.self) { group in
+                            let modules = group.modules
+                            if !modules.isEmpty {
+                                SidebarHeader(id: group.rawValue, title: group.title, count: modules.count)
+                                if !navigation.collapsedSections.contains(group.rawValue) {
+                                    ForEach(modules, id: \.id) { module in
+                                        SidebarItem(page: .module(module.id), isOn: registry.isEnabled(module))
+                                    }
+                                }
+                            }
+                        }
                     }
+                    .animation(.smooth(duration: 0.2), value: navigation.collapsedSections)
+                    .padding(.horizontal, 12)
                 }
-                .padding(.horizontal, 12)
             }
             .scrollIndicators(.never)
 
@@ -116,16 +297,145 @@ private struct SettingsSidebar: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 24)
-            .padding(.vertical, 20)
+            .padding(.vertical, 18)
         }
+    }
+}
+
+/// En-tête de section repliable (clic pour ouvrir / fermer).
+private struct SidebarHeader: View {
+    let id: String
+    let title: String
+    var count: Int?
+    private let navigation = SettingsNavigation.shared
+
+    var body: some View {
+        let collapsed = navigation.collapsedSections.contains(id)
+        Button {
+            navigation.toggleSection(id)
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                if collapsed, let count {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                        .padding(.horizontal, 5)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 12)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(collapsed ? tr("Afficher la section", "Show section") : tr("Masquer la section", "Hide section"))
+    }
+}
+
+/// Champ de recherche arrondi, avec bouton d'effacement.
+private struct SearchField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField(tr("Rechercher un réglage", "Search settings"), text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+private struct SearchResults: View {
+    private let navigation = SettingsNavigation.shared
+
+    var body: some View {
+        let results = navigation.results
+        VStack(alignment: .leading, spacing: 4) {
+            if results.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 20)).foregroundStyle(.tertiary)
+                    Text(tr("Aucun réglage trouvé", "No matching settings"))
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 30)
+            }
+            ForEach(results, id: \.page) { group in
+                HStack(spacing: 8) {
+                    IconTile(systemImage: group.page.icon.systemImage, tint: group.page.icon.tint, size: 18)
+                    Text(group.page.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 12)
+                ForEach(group.entries, id: \.self) { entry in
+                    SearchResultRow(entry: entry)
+                }
+            }
+        }
+    }
+}
+
+private struct SearchResultRow: View {
+    let entry: SearchEntry
+    private let navigation = SettingsNavigation.shared
+
+    var body: some View {
+        Button {
+            navigation.reveal(entry)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let section = entry.section {
+                    Text(section)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.04)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct SidebarItem: View {
     let page: SettingsPage
-    let title: String
-    let systemImage: String
-    let tint: Color
     var isOn: Bool?
 
     private let navigation = SettingsNavigation.shared
@@ -133,14 +443,16 @@ private struct SidebarItem: View {
     var body: some View {
         let selected = navigation.selection == page
         let hovered = navigation.hovered == page
+        let icon = page.icon
 
         HStack(spacing: 11) {
-            IconTile(systemImage: systemImage, tint: tint, size: 26)
+            IconTile(systemImage: icon.systemImage, tint: icon.tint, size: 26)
                 .saturation(isOn == false ? 0 : 1)
                 .opacity(isOn == false ? 0.55 : 1)
-            Text(title)
+            Text(page.title)
                 .font(.system(size: 13, weight: selected ? .semibold : .regular))
                 .foregroundStyle(selected ? Color.accentColor : isOn == false ? .secondary : .primary)
+                .lineLimit(1)
             Spacer()
             if let isOn {
                 Circle()
@@ -165,7 +477,7 @@ private struct SidebarItem: View {
 
 // MARK: - En-tête de page
 
-private struct PageHeader<Accessory: View>: View {
+struct PageHeader<Accessory: View>: View {
     let title: String
     let subtitle: String
     let systemImage: String
@@ -197,6 +509,7 @@ private struct PageHeader<Accessory: View>: View {
             accessory
         }
         .padding(.bottom, 10)
+        .searchable(title, detail: subtitle)
     }
 }
 
@@ -211,11 +524,17 @@ private struct GeneralPage: View {
             PageHeader(tr("Général", "General"), subtitle: tr("Comment l'île s'ouvre, où elle s'affiche.", "How the island opens and where it appears."),
                        systemImage: "gearshape.fill", tint: .gray)
 
-            SettingsCard(tr("Langue", "Language")) {
+            SettingsCard(tr("Langue et thème", "Language & theme")) {
                 PickerRow(tr("Langue de l'app", "App language"),
                           subtitle: tr("« Système » suit la langue de macOS.", "“System” follows the macOS language."),
                           selection: $settings.language) {
                     ForEach(AppLanguage.allCases) { Text($0.label).tag($0) }
+                }
+                PickerRow(tr("Thème des réglages", "Settings theme"),
+                          subtitle: tr("« Système » suit le mode clair ou sombre de macOS.",
+                                       "“System” follows the macOS light or dark mode."),
+                          selection: $settings.settingsTheme) {
+                    ForEach(SettingsTheme.allCases) { Text($0.label).tag($0) }
                 }
             }
 
@@ -227,16 +546,39 @@ private struct GeneralPage: View {
                     SliderRow(tr("Délai d'ouverture", "Open delay"), subtitle: tr("Évite les ouvertures en passant vers la barre des menus.", "Avoids opening when heading to the menu bar."),
                               value: $settings.hoverDelay, range: 0...1, step: 0.05, format: Self.seconds)
                 }
-                SliderRow(tr("Délai de fermeture", "Close delay"), value: $settings.collapseDelay, range: 0...1.5, step: 0.05, format: Self.seconds)
+                SliderRow(tr("Zone de détection", "Hover area"),
+                          subtitle: tr("Marge autour de l'encoche qui déclenche l'ouverture.", "Margin around the notch that triggers opening."),
+                          value: $settings.hoverPadding, range: 0...20, step: 1) { "\(Int($0)) pt" }
+                PickerRow(tr("Onglet à l'ouverture", "Tab when opening"), selection: $settings.alwaysOpenOnHome) {
+                    Text(tr("Accueil", "Home")).tag(true)
+                    Text(tr("Dernier utilisé", "Last used")).tag(false)
+                }
                 ToggleRow(tr("Retour haptique", "Haptic feedback"), subtitle: tr("Petite vibration du trackpad à l'ouverture.", "A light trackpad tap when it opens."), isOn: $settings.hapticFeedback)
             }
 
+            SettingsCard(tr("Fermeture", "Closing")) {
+                SliderRow(tr("Délai de fermeture", "Close delay"), value: $settings.collapseDelay, range: 0...1.5, step: 0.05, format: Self.seconds)
+                ToggleRow(tr("Fermer en cliquant ailleurs", "Close when clicking elsewhere"), isOn: $settings.closeOnClickOutside)
+            }
+
             SettingsCard(tr("Affichage", "Display")) {
+                ToggleRow(tr("Masquer en plein écran", "Hide in full screen"),
+                          subtitle: tr("L'île disparaît quand une app (vidéo, jeu…) passe en plein écran.",
+                                       "The island hides when an app (video, game…) goes full screen."),
+                          isOn: $settings.hideInFullScreen)
                 ToggleRow(tr("Écrans sans encoche", "Screens without a notch"), subtitle: tr("Affiche aussi une île sur les écrans externes.", "Also shows an island on external displays."),
                           isOn: $settings.showOnScreensWithoutNotch)
                 ToggleRow(tr("Icône dans la barre des menus", "Menu bar icon"),
                           subtitle: settings.showMenuBarIcon ? nil : tr("Clic droit sur l'île ou relance l'app pour revenir ici.", "Right-click the island or relaunch the app to come back here."),
                           isOn: $settings.showMenuBarIcon)
+            }
+
+            SettingsCard(tr("Aide", "Help")) {
+                SettingsRow(tr("Écran d'accueil", "Welcome screen"),
+                            subtitle: tr("Présentation, choix des modules et autorisations.",
+                                         "Introduction, module picker and permissions.")) {
+                    Button(tr("Revoir", "Show again")) { IslandCommands.showOnboarding() }
+                }
             }
 
             SettingsCard(tr("Système", "System"), footer: launchAtLogin.error) {
@@ -265,12 +607,23 @@ private struct AppearancePage: View {
 
             IslandPreview()
 
-            SettingsCard(tr("Couleur", "Color"), footer: tr("Fermée, l'île reste noire pour se fondre dans l'encoche de la caméra.", "When closed, the island stays black to blend into the camera notch.")) {
+            SettingsCard(tr("Couleur et matière", "Color & material"), footer: tr("Fermée, l'île reste noire pour se fondre dans l'encoche de la caméra.", "When closed, the island stays black to blend into the camera notch.")) {
                 SettingsRow(tr("Couleur de l'île ouverte", "Open island color"), subtitle: settings.islandColor.label) {
                     HStack(spacing: 10) {
                         ForEach(IslandColor.allCases) { option in
                             ColorSwatch(option: option, isSelected: settings.islandColor == option) {
                                 withAnimation(.smooth(duration: 0.25)) { settings.islandColor = option }
+                            }
+                        }
+                    }
+                }
+                SettingsRow(tr("Couleur d'accent", "Accent color"),
+                            subtitle: tr("Onglet sélectionné, curseurs et barre de progression. ", "Selected tab, sliders and progress bar. ")
+                                + settings.islandAccent.label) {
+                    HStack(spacing: 8) {
+                        ForEach(IslandAccent.allCases) { accent in
+                            AccentSwatch(accent: accent, isSelected: settings.islandAccent == accent) {
+                                settings.islandAccent = accent
                             }
                         }
                     }
@@ -295,11 +648,23 @@ private struct AppearancePage: View {
                 }
             }
 
-            SettingsCard(tr("Dimensions", "Size")) {
+            SettingsCard(tr("Forme", "Shape")) {
                 SliderRow(tr("Largeur", "Width"), value: $settings.expandedWidth, range: 400...860, step: 10) { "\(Int($0)) pt" }
                 SliderRow(tr("Hauteur", "Height"), value: $settings.expandedHeight, range: 120...320, step: 5) { "\(Int($0)) pt" }
                 SliderRow(tr("Arrondi", "Corner radius"), value: $settings.expandedCornerRadius, range: 8...48, step: 1) { "\(Int($0)) pt" }
+            }
+
+            SettingsCard(tr("Détails", "Details")) {
                 ToggleRow(tr("Ombre portée", "Drop shadow"), isOn: $settings.showShadow)
+                if settings.showShadow {
+                    SliderRow(tr("Intensité de l'ombre", "Shadow intensity"), value: $settings.shadowOpacity,
+                              range: 0.1...0.9, step: 0.05) { "\(Int($0 * 100)) %" }
+                }
+                ToggleRow(tr("Contour", "Outline"), subtitle: tr("Fin liseré autour de l'île ouverte.", "Thin outline around the open island."),
+                          isOn: $settings.islandBorder)
+                ToggleRow(tr("Bouton des réglages", "Settings button"),
+                          subtitle: tr("Engrenage en haut à droite de l'île ouverte.", "Gear at the top right of the open island."),
+                          isOn: $settings.showSettingsButton)
                 ToggleRow(tr("Séparateurs entre widgets", "Widget separators"), subtitle: tr("Filets verticaux entre les éléments de l'accueil.", "Vertical lines between home items."),
                           isOn: $settings.showWidgetSeparators)
             }
@@ -392,6 +757,32 @@ private struct IslandPreview: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .padding(10)
         }
+    }
+}
+
+/// Pastille de couleur d'accent ; « Neutre » est représenté par un demi noir / blanc.
+private struct AccentSwatch: View {
+    let accent: IslandAccent
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if accent == .neutral {
+                    Circle().fill(LinearGradient(colors: [.white, .black], startPoint: .topLeading, endPoint: .bottomTrailing))
+                } else {
+                    Circle().fill(accent.color)
+                }
+            }
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+            .frame(width: 18, height: 18)
+            .padding(3)
+            .overlay(Circle().strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2))
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(accent.label)
     }
 }
 
@@ -495,47 +886,24 @@ private struct ModulePage: View {
                 }
             }
 
-            SettingsCard(tr("Disposition", "Layout")) {
-                switch module.kind {
-                case .widget:
-                    PositionRow(module: module, title: tr("Position sur l'accueil", "Position on Home"), unit: tr("de gauche à droite", "left to right"))
-                case .page:
-                    PositionRow(module: module, title: tr("Position de l'onglet", "Tab position"),
-                                unit: tr("parmi les onglets en haut à gauche de l'île ouverte", "among the tabs at the top left of the open island"))
-                case .background:
-                    SettingsRow(tr("Autour de l'encoche", "Around the notch"),
-                                subtitle: tr("S'affiche sous forme d'activité en direct, pas dans l'île ouverte.", "Shows up as a live activity, not in the open island.")) {
-                        Image(systemName: "capsule.fill").foregroundStyle(.secondary)
+            if module.kind == .widget || module.kind == .page {
+                SettingsCard {
+                    SettingsRow(tr("Ordre d'affichage", "Display order"),
+                                subtitle: module.kind == .widget
+                                    ? tr("Organise les widgets de l'accueil dans la page Disposition.", "Arrange home widgets on the Layout page.")
+                                    : tr("Organise les onglets de l'île dans la page Disposition.", "Arrange island tabs on the Layout page."),
+                                icon: ("rectangle.3.group.fill", .indigo)) {
+                        Button(tr("Ouvrir", "Open")) { SettingsNavigation.shared.selection = .layout }
                     }
                 }
             }
 
             if let settingsView = module.settingsView() {
-                SettingsCard(tr("Réglages", "Settings")) { settingsView }
+                // Une carte par section (intertitres du module) : plus lisible qu'un long bloc.
+                SettingsSections(tr("Réglages", "Settings")) { settingsView }
                     .disabled(!enabled.wrappedValue)
                     .opacity(enabled.wrappedValue ? 1 : 0.5)
             }
-        }
-    }
-}
-
-/// Flèches pour déplacer un module parmi ceux du même type.
-private struct PositionRow: View {
-    let module: any IslandModule
-    let title: String
-    let unit: String
-    private let registry = ModuleRegistry.shared
-
-    var body: some View {
-        let position = registry.position(of: module)
-        SettingsRow(title, subtitle: position.map { tr("\($0.index) sur \($0.count), \(unit)", "\($0.index) of \($0.count), \(unit)") }) {
-            ControlGroup {
-                Button { registry.move(module, by: -1) } label: { Image(systemName: "chevron.left") }
-                    .disabled(position?.index == 1)
-                Button { registry.move(module, by: 1) } label: { Image(systemName: "chevron.right") }
-                    .disabled(position.map { $0.index == $0.count } ?? true)
-            }
-            .fixedSize()
         }
     }
 }
@@ -559,16 +927,23 @@ private struct VisualEffectBackground: NSViewRepresentable {
 }
 
 @Observable
-private final class LaunchAtLogin {
+final class LaunchAtLogin {
     static let shared = LaunchAtLogin()
 
     private(set) var error: String?
+    /// Incrémenté à chaque changement pour que SwiftUI relise l'état réel.
+    private var revision = 0
 
-    var isEnabled: Bool = SMAppService.mainApp.status == .enabled {
-        didSet {
-            guard isEnabled != oldValue else { return }
+    /// Toujours l'état réel de macOS : après un échec, ou un changement fait dans Réglages
+    /// Système › Ouverture, l'interrupteur reflète ce qui est vraiment enregistré.
+    var isEnabled: Bool {
+        get {
+            _ = revision
+            return SMAppService.mainApp.status == .enabled
+        }
+        set {
             do {
-                if isEnabled {
+                if newValue {
                     try SMAppService.mainApp.register()
                 } else {
                     try SMAppService.mainApp.unregister()
@@ -577,6 +952,7 @@ private final class LaunchAtLogin {
             } catch {
                 self.error = error.localizedDescription
             }
+            revision += 1
         }
     }
 }

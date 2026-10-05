@@ -53,7 +53,11 @@ final class NotchViewModel {
     }
 
     func expand(page: String? = nil) {
-        if let page { selectedPage = page }
+        if let page {
+            selectedPage = page
+        } else if !isExpanded, settings.alwaysOpenOnHome {
+            selectedPage = Self.homePage
+        }
         validateSelectedPage()
         guard !isExpanded else { return }
         isExpanded = true

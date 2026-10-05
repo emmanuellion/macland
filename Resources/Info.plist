@@ -15,9 +15,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.1.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
     <key>LSUIElement</key>
@@ -26,6 +26,10 @@
     <string>macland affiche tes prochains événements dans l'encoche.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>macland affiche tes prochains événements dans l'encoche.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>macland utilise ta position pour afficher la météo de ta ville.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>macland utilise ta position pour afficher la météo de ta ville.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

@@ -279,6 +279,7 @@ private struct CalendarSettingsView: View {
                 }
             }
         }
+        SettingsSubheader(tr("Affichage", "Display"))
         StepperRow(tr("Événements affichés", "Events shown"), value: $module.maxEvents, range: 1...5)
         PickerRow(tr("Période", "Range"), selection: $module.daysAhead) {
             Text(tr("Aujourd'hui", "Today")).tag(1.0)
@@ -287,6 +288,7 @@ private struct CalendarSettingsView: View {
         }
         ToggleRow(tr("Événements sur la journée", "All-day events"), isOn: $module.showAllDay)
         ToggleRow(tr("Afficher le lieu", "Show location"), isOn: $module.showLocation)
+        SettingsSubheader(tr("Rappels", "Reminders"))
         PickerRow(tr("Rappel avant le début", "Reminder before start"),
                   subtitle: tr("Activité en direct autour de l'encoche.", "Live activity around the notch."),
                   selection: $module.alertMinutesBefore) {

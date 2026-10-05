@@ -7,6 +7,8 @@ enum ModuleKind {
     case page
     /// Module sans affichage dans l'île ouverte (ex. : HUD, indicateurs) : seulement des activités en direct.
     case background
+    /// Service sans rien dans l'île (ex. : fonds d'écran animés).
+    case service
 }
 
 /// Un élément affichable dans l'île (horloge, batterie, musique, calendrier…).
@@ -28,6 +30,8 @@ protocol IslandModule: AnyObject {
     var layoutPriority: Double { get }
     /// Un widget peut se masquer temporairement de l'accueil (ex. : rien en lecture).
     var isVisibleInHome: Bool { get }
+    /// Petit indicateur affiché en haut à droite de l'île ouverte, à côté des réglages. `nil` si aucun.
+    func headerAccessory() -> AnyView?
 
     /// Contenu affiché dans l'île ouverte (widget ou page selon `kind`).
     func expandedView() -> AnyView
@@ -48,6 +52,7 @@ extension IslandModule {
     var enabledByDefault: Bool { true }
     var layoutPriority: Double { 0 }
     var isVisibleInHome: Bool { true }
+    func headerAccessory() -> AnyView? { nil }
     func settingsView() -> AnyView? { nil }
     func start() {}
     func stop() {}

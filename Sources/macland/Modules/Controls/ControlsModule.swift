@@ -64,22 +64,26 @@ final class ControlsModule: IslandModule {
     }
 
     func setVolume(_ value: Double) {
+        SystemHUDModule.noteInAppChange()
         AudioDevices.setVolume(Float(value))
         volume = value
         isMuted = AudioDevices.isMuted
     }
 
     func toggleMute() {
+        SystemHUDModule.noteInAppChange()
         AudioDevices.setMuted(!isMuted)
         isMuted.toggle()
     }
 
     func setDisplayBrightness(_ value: Double) {
+        SystemHUDModule.noteInAppChange()
         DisplayBrightness.set(Float(value))
         displayBrightness = value
     }
 
     func setKeyboardBrightness(_ value: Double) {
+        SystemHUDModule.noteInAppChange()
         KeyboardBrightness.set(Float(value))
         keyboardBrightness = value
     }
@@ -134,7 +138,8 @@ private struct CapsuleSlider: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.12))
                 Rectangle()
-                    .fill(Color.primary.opacity(0.85))
+                    .fill(IslandSettings.shared.islandAccent == .neutral
+                          ? Color.primary.opacity(0.85) : IslandSettings.shared.islandAccent.color)
                     .frame(width: width * min(max(value, 0), 1))
                 // L'icône s'inverse quand le remplissage passe dessous.
                 Image(systemName: systemImage)

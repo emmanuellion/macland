@@ -139,13 +139,24 @@ final class ShelfModule: FileDropReceiving {
         NSWorkspace.shared.activateFileViewerSelecting([item.url])
     }
 
+    /// Garde le délégué en vie pendant l'envoi (le service ne le retient pas).
+    @ObservationIgnored private var airDropDelegate: AirDropDelegate?
+
     func airDrop(_ urls: [URL]) {
         guard !urls.isEmpty, let service = NSSharingService(named: .sendViaAirDrop) else { return }
+        // Retrait seulement une fois l'envoi réussi : en mode copie, supprimer avant (pendant le choix
+        // de l'appareil) détruisait le fichier à envoyer.
+        let delegate = AirDropDelegate { [weak self] succeeded in
+            guard let self else { return }
+            if succeeded, removeAfterAirDrop {
+                items.filter { urls.contains($0.url) }.forEach(remove)
+            }
+            airDropDelegate = nil
+        }
+        airDropDelegate = delegate
+        service.delegate = delegate
         NSApp.activate()
         service.perform(withItems: urls)
-        if removeAfterAirDrop {
-            items.filter { urls.contains($0.url) }.forEach(remove)
-        }
     }
 
     func airDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -205,21 +216,21 @@ final class ShelfModule: FileDropReceiving {
         let fm = FileManager.default
         if persistItems {
             try? fm.createDirectory(at: Self.supportDirectory, withIntermediateDirectories: true)
-            try? JSONEncoder().encode(items).write(to: Self.indexFile)
+            try? JSONEncoder().encode(items).write(to: Self.indexFile, options: .atomic)
         } else {
             try? fm.removeItem(at: Self.indexFile)
         }
     }
 
     private func load() {
-        guard persistItems,
-              let data = try? Data(contentsOf: Self.indexFile),
-              let saved = try? JSONDecoder().decode([ShelfItem].self, from: data)
-        else {
+        guard persistItems else {
             // Sans persistance, les copies d'une session précédente ne servent plus.
             try? FileManager.default.removeItem(at: Self.copiesDirectory)
             return
         }
+        // Index illisible : on ne supprime surtout rien, les copies sont peut-être les seules.
+        guard let data = try? Data(contentsOf: Self.indexFile),
+              let saved = try? JSONDecoder().decode([ShelfItem].self, from: data) else { return }
 
         items = saved.compactMap { item in
             var item = item
@@ -233,6 +244,23 @@ final class ShelfModule: FileDropReceiving {
             return FileManager.default.fileExists(atPath: item.url.path) ? item : nil
         }
         items.forEach(makeThumbnail)
+    }
+}
+
+/// Prévient quand un envoi AirDrop se termine (réussi ou non).
+private final class AirDropDelegate: NSObject, NSSharingServiceDelegate {
+    private let completion: @MainActor (Bool) -> Void
+
+    init(completion: @escaping @MainActor (Bool) -> Void) {
+        self.completion = completion
+    }
+
+    func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+
+    func sharingService(_ sharingService: NSSharingService, didFailToShareItems items: [Any], error: Error) {
+        MainActor.assumeIsolated { completion(false) }
     }
 }
 
@@ -391,6 +419,7 @@ private struct ShelfSettingsView: View {
     @Bindable var module: ShelfModule
 
     var body: some View {
+        SettingsSubheader(tr("Stockage", "Storage"))
         PickerRow(tr("Stockage des fichiers", "File storage"),
                   subtitle: module.storageMode == .reference
                       ? tr("L'étagère pointe vers le fichier d'origine.", "The shelf points to the original file.")
@@ -401,15 +430,16 @@ private struct ShelfSettingsView: View {
         ToggleRow(tr("Conserver après redémarrage", "Keep after restart"),
                   subtitle: tr("Retrouver le contenu de l'étagère au prochain lancement.", "Restore the shelf contents on next launch."),
                   isOn: $module.persistItems)
-        ToggleRow(tr("Zone AirDrop", "AirDrop zone"),
-                  subtitle: tr("Affiche une zone de dépôt pour envoyer directement par AirDrop.", "Shows a drop zone to send straight with AirDrop."),
-                  isOn: $module.showAirDropZone)
-        ToggleRow(tr("Retirer après un envoi AirDrop", "Remove after AirDrop"), isOn: $module.removeAfterAirDrop)
         SettingsRow(tr("Contenu actuel", "Current contents"),
                     subtitle: tr("\(module.items.count) élément\(module.items.count > 1 ? "s" : "")",
                                  "\(module.items.count) item\(module.items.count == 1 ? "" : "s")")) {
             Button(tr("Vider", "Clear"), role: .destructive) { module.removeAll() }
                 .disabled(module.items.isEmpty)
         }
+        SettingsSubheader(tr("AirDrop", "AirDrop"))
+        ToggleRow(tr("Zone AirDrop", "AirDrop zone"),
+                  subtitle: tr("Affiche une zone de dépôt pour envoyer directement par AirDrop.", "Shows a drop zone to send straight with AirDrop."),
+                  isOn: $module.showAirDropZone)
+        ToggleRow(tr("Retirer après un envoi AirDrop", "Remove after AirDrop"), isOn: $module.removeAfterAirDrop)
     }
 }

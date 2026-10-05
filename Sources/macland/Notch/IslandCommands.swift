@@ -5,6 +5,12 @@ import Foundation
 enum IslandCommands {
     static let openPageNotification = Notification.Name("IslandOpenPage")
     static let collapseNotification = Notification.Name("IslandCollapse")
+    static let showOnboardingNotification = Notification.Name("IslandShowOnboarding")
+
+    /// Rouvre l'écran d'accueil.
+    static func showOnboarding() {
+        NotificationCenter.default.post(name: showOnboardingNotification, object: nil)
+    }
 
     /// Ouvre l'île sur une page (`NotchViewModel.homePage` ou l'identifiant d'un module de type `.page`).
     static func open(page: String) {

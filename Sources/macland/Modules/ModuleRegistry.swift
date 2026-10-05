@@ -13,11 +13,14 @@ final class ModuleRegistry {
         NowPlayingModule(),
         ClockModule(),
         CalendarModule(),
+        WeatherModule(),
         BatteryModule(),
         ClipboardModule(),
         ShelfModule(),
         ControlsModule(),
         SystemHUDModule(),
+        AirPodsModule(),
+        WallpaperModule(),
         PrivacyIndicatorModule(),
     ]
 
@@ -68,23 +71,24 @@ final class ModuleRegistry {
         enabled ? module.start() : module.stop()
     }
 
-    /// Position (1-based) d'un module parmi ceux du même type (widgets ou pages), et nombre total.
-    func position(of module: any IslandModule) -> (index: Int, count: Int)? {
-        let sameKind = orderedModules.filter { $0.kind == module.kind }
-        guard let index = sameKind.firstIndex(where: { $0.id == module.id }) else { return nil }
-        return (index + 1, sameKind.count)
+    /// Place le module `id` juste avant `targetID` (glisser-déposer dans la page Disposition).
+    func move(_ id: String, before targetID: String) {
+        guard id != targetID else { return }
+        var ids = orderedModules.map(\.id)
+        guard let from = ids.firstIndex(of: id) else { return }
+        ids.remove(at: from)
+        guard let to = ids.firstIndex(of: targetID) else { return }
+        ids.insert(id, at: to)
+        settings.moduleOrder = ids
     }
 
-    /// Échange un module avec son voisin du même type (-1 = vers la gauche, +1 = vers la droite).
-    func move(_ module: any IslandModule, by offset: Int) {
+    /// Place le module `id` en dernier parmi ceux de son type.
+    func moveToEnd(_ id: String) {
+        guard let module = module(id: id) else { return }
         var ids = orderedModules.map(\.id)
-        let sameKindIDs = orderedModules.filter { $0.kind == module.kind }.map(\.id)
-        guard let position = sameKindIDs.firstIndex(of: module.id),
-              sameKindIDs.indices.contains(position + offset),
-              let from = ids.firstIndex(of: module.id),
-              let to = ids.firstIndex(of: sameKindIDs[position + offset])
-        else { return }
-        ids.swapAt(from, to)
+        ids.removeAll { $0 == id }
+        let lastOfKind = ids.lastIndex { self.module(id: $0)?.kind == module.kind } ?? (ids.count - 1)
+        ids.insert(id, at: min(lastOfKind + 1, ids.count))
         settings.moduleOrder = ids
     }
 }

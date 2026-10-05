@@ -1,6 +1,22 @@
 import IOKit.ps
 import SwiftUI
 
+enum BatteryPlacement: String, CaseIterable, Identifiable {
+    /// Petit indicateur en haut à droite de l'île ouverte.
+    case corner
+    /// Widget de l'accueil.
+    case widget
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .corner: tr("Coin", "Corner")
+        case .widget: tr("Widget", "Widget")
+        }
+    }
+}
+
 struct BatteryState: Equatable {
     var percentage: Int = 0
     var isCharging = false
@@ -22,12 +38,14 @@ final class BatteryModule: IslandModule {
     @ObservationIgnored private let store = ModuleDefaults(moduleID: "battery", registering: [
         "showTimeRemaining": true,
         "lowThreshold": 20.0,
+        "placement": BatteryPlacement.corner.rawValue,
         "chargingActivity": true,
         "lowBatteryActivity": true,
     ])
 
     var showTimeRemaining: Bool { didSet { store.set(showTimeRemaining, "showTimeRemaining") } }
     var lowThreshold: Double { didSet { store.set(lowThreshold, "lowThreshold") } }
+    var placement: BatteryPlacement { didSet { store.set(placement.rawValue, "placement") } }
     /// Activité en direct au branchement / débranchement du chargeur.
     var chargingActivity: Bool { didSet { store.set(chargingActivity, "chargingActivity") } }
     /// Activité en direct quand la batterie passe sous le seuil.
@@ -40,11 +58,19 @@ final class BatteryModule: IslandModule {
     init() {
         showTimeRemaining = store.bool("showTimeRemaining")
         lowThreshold = store.double("lowThreshold")
+        placement = BatteryPlacement(rawValue: store.string("placement")) ?? .corner
         chargingActivity = store.bool("chargingActivity")
         lowBatteryActivity = store.bool("lowBatteryActivity")
     }
 
     func expandedView() -> AnyView { AnyView(BatteryView(module: self)) }
+
+    var isVisibleInHome: Bool { placement == .widget }
+
+    func headerAccessory() -> AnyView? {
+        guard placement == .corner, state.hasBattery else { return nil }
+        return AnyView(BatteryCorner(module: self))
+    }
     func settingsView() -> AnyView? { AnyView(BatterySettingsView(module: self)) }
 
     func start() {
@@ -143,27 +169,67 @@ private struct BatteryView: View {
         return state.isCharging ? tr("Pleine dans \(time)", "Full in \(time)") : tr("\(time) restantes", "\(time) left")
     }
 
+    private func icon(width: CGFloat) -> some View {
+        BatteryIcon(percentage: state.percentage, color: tint, isCharging: state.isCharging)
+            .frame(width: width, height: width * 0.47)
+    }
+
+    private func percentage(size: CGFloat) -> some View {
+        Text("\(state.percentage) %")
+            .font(.system(size: size, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(Color.primary)
+    }
+
     var body: some View {
         if state.hasBattery {
-            HStack(spacing: 10) {
-                BatteryIcon(percentage: state.percentage, color: tint, isCharging: state.isCharging)
-                    .frame(width: 38, height: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(state.percentage) %")
-                        .font(.system(size: 20, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.primary)
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
+            // Du plus complet au plus compact : l'île garde la première variante qui tient.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    icon(width: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        percentage(size: 20)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
+                HStack(spacing: 8) {
+                    icon(width: 30)
+                    percentage(size: 18)
+                }
+                VStack(spacing: 4) {
+                    icon(width: 26)
+                    percentage(size: 14).minimumScaleFactor(0.7)
+                }
             }
+            .lineLimit(1)
         } else {
             Label(tr("Pas de batterie", "No battery"), systemImage: "powerplug")
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Indicateur compact du coin supérieur droit : pourcentage + petite batterie.
+private struct BatteryCorner: View {
+    let module: BatteryModule
+
+    var body: some View {
+        let state = module.state
+        let color: Color = state.isCharging || state.isPluggedIn ? .green
+            : Double(state.percentage) <= module.lowThreshold ? .red : Color.primary
+        HStack(spacing: 5) {
+            Text("\(state.percentage) %")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            BatteryIcon(percentage: state.percentage, color: color, isCharging: state.isCharging)
+                .frame(width: 24, height: 11)
+        }
+        .help(state.isCharging ? tr("En charge", "Charging") : tr("Batterie", "Battery"))
     }
 }
 
@@ -226,16 +292,25 @@ private struct BatterySettingsView: View {
     @Bindable var module: BatteryModule
 
     var body: some View {
+        SettingsSubheader(tr("Affichage", "Display"))
+        PickerRow(tr("Position", "Position"),
+                  subtitle: module.placement == .corner
+                      ? tr("Petit indicateur en haut à droite de l'île ouverte.", "Small indicator at the top right of the open island.")
+                      : tr("Widget sur l'accueil, à côté des autres.", "Widget on the home page, next to the others."),
+                  selection: $module.placement) {
+            ForEach(BatteryPlacement.allCases) { Text($0.label).tag($0) }
+        }
         ToggleRow(tr("Autonomie restante", "Time remaining"),
                   subtitle: tr("Temps avant la fin de la charge ou de la batterie.", "Time until fully charged or empty."),
                   isOn: $module.showTimeRemaining)
+        SettingsSubheader(tr("Alertes", "Alerts"))
         SliderRow(tr("Seuil batterie faible", "Low battery threshold"), value: $module.lowThreshold, range: 5...50, step: 5) { "\(Int($0)) %" }
+        ToggleRow(tr("Alerte batterie faible", "Low battery alert"),
+                  subtitle: tr("Prévient quand le niveau passe sous le seuil.", "Warns when the level drops below the threshold."),
+                  isOn: $module.lowBatteryActivity)
         ToggleRow(tr("Activité au branchement", "Charger activity"),
                   subtitle: tr("Affiche le niveau quand tu branches ou débranches le chargeur.",
                                "Shows the level when you plug in or unplug the charger."),
                   isOn: $module.chargingActivity)
-        ToggleRow(tr("Alerte batterie faible", "Low battery alert"),
-                  subtitle: tr("Prévient quand le niveau passe sous le seuil.", "Warns when the level drops below the threshold."),
-                  isOn: $module.lowBatteryActivity)
     }
 }

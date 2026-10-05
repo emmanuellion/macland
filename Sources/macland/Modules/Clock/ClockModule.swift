@@ -33,30 +33,51 @@ private struct ClockView: View {
     let module: ClockModule
 
     /// Format explicite : le format « 2 chiffres » de la locale anglaise repasse en 12 h.
-    private func time(_ date: Date) -> String {
+    private func time(_ date: Date, seconds: Bool) -> String {
         let formatter = DateFormatter()
         formatter.locale = IslandSettings.shared.locale
-        let seconds = module.showSeconds ? ":ss" : ""
-        formatter.dateFormat = module.use24Hour ? "HH:mm\(seconds)" : "h:mm\(seconds) a"
+        let secondsFormat = seconds ? ":ss" : ""
+        formatter.dateFormat = module.use24Hour ? "HH:mm\(secondsFormat)" : "h:mm\(secondsFormat) a"
         return formatter.string(from: date)
+    }
+
+    private func date(_ date: Date, short: Bool) -> String {
+        let style = Date.FormatStyle.dateTime.locale(IslandSettings.shared.locale)
+        let text = short
+            ? date.formatted(style.weekday(.abbreviated).day().month(.abbreviated))
+            : date.formatted(style.weekday(.wide).day().month(.wide))
+        return text.capitalizingFirstLetter
     }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(alignment: .leading, spacing: 2) {
-                Text(time(context.date))
-                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+            // Du plus complet au plus compact : l'île garde la première variante qui tient.
+            ViewThatFits(in: .horizontal) {
+                variant(context.date, size: 34, seconds: module.showSeconds, shortDate: false)
+                variant(context.date, size: 30, seconds: false, shortDate: true)
+                Text(time(context.date, seconds: false))
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .contentTransition(.numericText())
-                if module.showDate {
-                    Text(context.date.formatted(.dateTime.locale(IslandSettings.shared.locale).weekday(.wide).day().month(.wide))
-                        .capitalizingFirstLetter)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             .foregroundStyle(Color.primary)
         }
+    }
+
+    private func variant(_ now: Date, size: CGFloat, seconds: Bool, shortDate: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(time(now, seconds: seconds))
+                .font(.system(size: size, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            if module.showDate {
+                Text(date(now, short: shortDate))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .lineLimit(1)
     }
 }
 
